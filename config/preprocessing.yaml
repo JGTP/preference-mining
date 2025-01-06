@@ -1,0 +1,116 @@
+# config/preprocessing.yaml
+
+# Columns containing date information
+date_columns:
+  - iyear
+  - imonth
+  - iday
+
+# Columns containing geographic coordinates (in pairs)
+coordinate_columns:
+  - latitude
+  - longitude
+
+# Columns containing categorical data as strings
+categorical_columns:
+  - attacktype1_txt
+  - attacktype2_txt
+  - attacktype3_txt
+  - weaptype1_txt
+  - weaptype2_txt
+  - weaptype3_txt
+  - weaptype4_txt
+  - weapsubtype1_txt
+  - weapsubtype2_txt
+  - weapsubtype3_txt
+  - weapsubtype4_txt
+  - corp1
+  - corp2
+  - corp3
+  - target1
+  - target2
+  - target3
+  - natlty1_txt
+  - natlty2_txt
+  - natlty3_txt
+  - alternative_txt
+  - targtype1_txt
+  - targsubtype1_txt
+  - targtype2_txt
+  - targsubtype2_txt
+  - targtype3_txt
+  - targsubtype3_txt
+  - propextent_txt
+  - hostkidoutcome_txt
+  - claimmode_txt
+  - claimmode2_txt
+  - claimmode3_txt
+
+# Columns containing categorical data as numbers
+numeric_categorical_columns:
+  - extended
+  - attacktype1
+  - attacktype2
+  - attacktype3
+  - weaptype1
+  - weaptype2
+  - weaptype3
+  - weaptype4
+  - weapsubtype1
+  - weapsubtype2
+  - weapsubtype3
+  - weapsubtype4 
+  - success
+  - suicide
+  - claimed
+  - claimmode
+  - claim2
+  - claimmode2
+  - claim3
+  - claimmode3
+  - compclaim
+  - property
+  - ishostkid
+  - ransom
+  - targtype1
+  - targsubtype1
+  - targtype2
+  - targsubtype2 
+  - targtype3
+  - targsubtype3
+  - propextent
+  - hostkidoutcome
+  - multiple
+  - crit1
+  - crit2
+  - crit3
+  - vicinity
+  - individual
+  - specificity
+  - doubtterr
+  - alternative
+  - country
+  - region
+  - natlty1
+  - natlty2
+  - natlty3
+  - guncertain1
+  - guncertain2
+  - guncertain3
+  - INT_LOG
+  - INT_IDEO
+  - INT_MISC
+  - INT_ANY
+
+# Columns to exclude from processing
+columns_to_exclude:
+  # - id
+  # - customer_id
+  # - notes
+
+# Special codes for missing values by column
+missing_value_codes:
+  # temperature: [-99, -999]
+  # humidity: [-9]
+  # wind_speed: [-999]
+  # precipitation: [-99]
