@@ -1,0 +1,26 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Python Script with Arguments",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "main.py",
+                "data/globalterrorismdb_0522dist.xlsx",
+                "--test",
+                "--target",
+                "doubtterr"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

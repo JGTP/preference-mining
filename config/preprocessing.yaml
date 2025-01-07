@@ -1,52 +1,28 @@
-# config/preprocessing.yaml
-
-# Columns containing date information
 date_columns:
   - iyear
   - imonth
   - iday
-
-# Columns containing geographic coordinates (in pairs)
 coordinate_columns:
   - latitude
   - longitude
-
-# Columns containing categorical data as strings
-categorical_columns:
-  - attacktype1_txt
-  - attacktype2_txt
-  - attacktype3_txt
-  - weaptype1_txt
-  - weaptype2_txt
-  - weaptype3_txt
-  - weaptype4_txt
-  - weapsubtype1_txt
-  - weapsubtype2_txt
-  - weapsubtype3_txt
-  - weapsubtype4_txt
-  - corp1
-  - corp2
-  - corp3
-  - target1
-  - target2
-  - target3
-  - natlty1_txt
-  - natlty2_txt
-  - natlty3_txt
-  - alternative_txt
-  - targtype1_txt
-  - targsubtype1_txt
-  - targtype2_txt
-  - targsubtype2_txt
-  - targtype3_txt
-  - targsubtype3_txt
-  - propextent_txt
-  - hostkidoutcome_txt
-  - claimmode_txt
-  - claimmode2_txt
-  - claimmode3_txt
-
-# Columns containing categorical data as numbers
+numerical_columns:
+  - nperps
+  - nperpcap
+  - nkill
+  - nkillus
+  - nkillter
+  - nwound
+  - nwoundus
+  - woundte
+  - propvalue
+  - nhostkid
+  - nhostkidus
+  - nhours
+  - ransomamt 
+  - ransomamtus
+  - ransompaid
+  - ransompaidus
+  - nreleased
 numeric_categorical_columns:
   - extended
   - attacktype1
@@ -70,6 +46,7 @@ numeric_categorical_columns:
   - claimmode3
   - compclaim
   - property
+  - propextent
   - ishostkid
   - ransom
   - targtype1
@@ -78,7 +55,6 @@ numeric_categorical_columns:
   - targsubtype2 
   - targtype3
   - targsubtype3
-  - propextent
   - hostkidoutcome
   - multiple
   - crit1
@@ -87,8 +63,6 @@ numeric_categorical_columns:
   - vicinity
   - individual
   - specificity
-  - doubtterr
-  - alternative
   - country
   - region
   - natlty1
@@ -101,16 +75,87 @@ numeric_categorical_columns:
   - INT_IDEO
   - INT_MISC
   - INT_ANY
-
-# Columns to exclude from processing
-columns_to_exclude:
-  # - id
-  # - customer_id
-  # - notes
-
-# Special codes for missing values by column
+columns_to_exclude: 
+  - attacktype1_txt
+  - attacktype2_txt
+  - attacktype3_txt
+  - weaptype1_txt
+  - weaptype2_txt
+  - weaptype3_txt
+  - weaptype4_txt
+  - weapsubtype1_txt
+  - weapsubtype2_txt
+  - weapsubtype3_txt
+  - weapsubtype4_txt
+  - natlty1_txt
+  - natlty2_txt
+  - natlty3_txt
+  - alternative_txt
+  - targtype1_txt
+  - targsubtype1_txt
+  - targtype2_txt
+  - targsubtype2_txt
+  - targtype3_txt
+  - targsubtype3_txt
+  - propextent_txt
+  - hostkidoutcome_txt
+  - claimmode_txt
+  - claimmode2_txt
+  - claimmode3_txt
+  - approxdate
+  - resolution
+  - summary
+  - alternative
+  - related
+  - province
+  - city
+  - location
+  - weapdetail
+  - corp1
+  - corp2
+  - corp3
+  - target1
+  - target2
+  - target3
+  - gname
+  - gsubname
+  - gname2
+  - gsubname2
+  - gname3
+  - gsubname3
+  - motive
+  - propcomment
+  - divert
+  - kidhijcountry
+  - ransomnote
+  - addnote
+  - scite
+  - scite2
+  - scite3
+  - dbsource
 missing_value_codes:
-  # temperature: [-99, -999]
-  # humidity: [-9]
-  # wind_speed: [-999]
-  # precipitation: [-99]
+  "4":
+    - propextent
+  "7":
+    - hostkidoutcome
+  "-9":
+    - doubtterr
+    - compclaim
+    - compclaim2
+    - compclaim3
+    - property
+    - ishostkid
+    - ransom
+    - INT_LOG
+    - INT_IDEO
+    - INT_MISC
+    - INT_ANY
+  "10":
+    - claimmode
+  "-99":
+    - nhostkid
+    - nhostkidus
+    - nhours
+    - ndays
+    - nreleased
+    - 

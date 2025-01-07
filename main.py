@@ -36,9 +36,9 @@ if __name__ == "__main__":
 
     execute_pipeline(
         args.data_path,
+        args.target,
         args.test,
         args.config,
-        args.target,
         args.output_dir,
         args.save_intermediate,
     )

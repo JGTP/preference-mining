@@ -6,13 +6,11 @@ from typing import Tuple, Optional
 from src.preprocessing import DataPreprocessor
 from src.classifier import train_RIPPER_classifier, evaluate_classifier
 
-
 def setup_logging():
     """Configure logging for the pipeline"""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
-
 
 def load_preprocessing_config(config_path: str = "config/preprocessing.yaml") -> dict:
     """
@@ -38,7 +36,6 @@ def load_preprocessing_config(config_path: str = "config/preprocessing.yaml") ->
         logging.error(f"Error parsing config file: {e}")
         raise
 
-
 def save_processed_data(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
@@ -55,12 +52,11 @@ def save_processed_data(
     y_train.to_csv(output_path / "y_train.csv", index=False)
     y_test.to_csv(output_path / "y_test.csv", index=False)
 
-
 def execute_pipeline(
     data_path: str,
+    target_column: str,
     test: bool = False,
     config_path: str = "config/preprocessing.yaml",
-    target_column: str = "target",
     output_dir: Optional[str] = None,
     save_intermediate: bool = False,
 ) -> Tuple[object, list]:
@@ -80,11 +76,10 @@ def execute_pipeline(
     setup_logging()
     logging.info("Starting pipeline execution")
 
-    # Load data
     try:
         logging.info(f"Loading data from {data_path}")
         if test == True:
-            data = pd.read_excel(data_path, nrows=100)
+            data = pd.read_excel(data_path, nrows=10)
         else:
             data = pd.read_excel(data_path)
         logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns")
@@ -92,7 +87,6 @@ def execute_pipeline(
         logging.error(f"Error loading data: {e}")
         raise
 
-    # Load preprocessing configuration
     try:
         logging.info(f"Loading configuration from {config_path}")
         config = load_preprocessing_config(config_path)
@@ -100,7 +94,6 @@ def execute_pipeline(
         logging.error(f"Error loading configuration: {e}")
         raise
 
-    # Initialize preprocessor with configuration
     preprocessor = DataPreprocessor(
         date_columns=config.get("date_columns", []),
         coordinate_columns=config.get("coordinate_columns", []),
@@ -110,7 +103,6 @@ def execute_pipeline(
         missing_value_codes=config.get("missing_value_codes", {}),
     )
 
-    # Preprocess data
     try:
         logging.info("Preprocessing data")
         X_train, X_test, y_train, y_test = preprocessor.preprocess_data(
@@ -128,19 +120,17 @@ def execute_pipeline(
         logging.error(f"Error during preprocessing: {e}")
         raise
 
-    # Train classifier
     try:
         logging.info("Training RIPPER classifier")
-        classifier, rules = train_RIPPER_classifier(X_train, y_train)
+        classifier, rules = train_RIPPER_classifier(X_train, y_train, target_column)
         logging.info(f"Generated {len(rules)} rules")
     except Exception as e:
         logging.error(f"Error during classifier training: {e}")
         raise
 
-    # Evaluate classifier
     try:
         logging.info("Evaluating classifier")
-        evaluate_classifier(classifier, X_test, y_test, rules)
+        evaluate_classifier(classifier, X_test, y_test, target_column, rules)
     except Exception as e:
         logging.error(f"Error during evaluation: {e}")
         raise

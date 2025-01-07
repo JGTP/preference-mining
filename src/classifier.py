@@ -4,11 +4,9 @@ import pandas as pd
 import numpy as np
 from colorama import Fore, Style, init
 
-# Initialize colorama for cross-platform compatibility
 init(autoreset=True)
 
-
-def train_RIPPER_classifier(X_train, y_train):
+def train_RIPPER_classifier(X_train, y_train, target_name='target'):
     """
     Train a RIPPER classifier and display the learned rules with metrics.
 
@@ -19,53 +17,34 @@ def train_RIPPER_classifier(X_train, y_train):
     Returns:
     tuple: (trained classifier, ruleset)
     """
-    # Convert numpy arrays to DataFrame if necessary
-    if isinstance(X_train, np.ndarray):
-        X_train = pd.DataFrame(X_train)
-
-    # Ensure column names exist
-    if X_train.columns.dtype == "int64":
-        X_train.columns = [f"feature_{i}" for i in range(len(X_train.columns))]
-
-    # Create training DataFrame
-    df_train = X_train.copy()
-    df_train["target"] = y_train
-
-    # Initialize and train the RIPPER classifier
-    classifier = lw.RIPPER(k=2, prune_size=0.33)  # k=2 for two optimization phases
+    
+    classifier = lw.RIPPER(k=2, prune_size=0.33) 
     try:
-        classifier.fit(df_train, class_feat="target", pos_class=1)
+        classifier.fit(trainset=X_train, y=y_train) 
     except Exception as e:
         print(f"Error during training: {str(e)}")
-        print("Trying alternative configuration...")
-        # Try alternative configuration if initial training fails
-        classifier = lw.RIPPER(k=1, prune_size=0.5)
-        classifier.fit(df_train, class_feat="target")
 
-    # Get the ruleset
     ruleset = classifier.ruleset_
 
-    # Display rules and metrics
+    df_train = X_train.copy()
+    df_train[target_name] = y_train
+
     print(Fore.CYAN + "\nDecision Rules:\n" + "=" * 50)
     for i, rule in enumerate(ruleset.rules, start=1):
-        # Compute metrics for this rule
+        
         try:
-            rule_support = ruleset.support(rule, df_train, "target")
-            rule_accuracy = ruleset.accuracy(rule, df_train, "target")
+            rule_support = ruleset.support(rule, df_train, target_name)
+            rule_accuracy = ruleset.accuracy(rule, df_train, target_name)
             rule_coverage = rule_support / len(df_train)
             false_positive_rate = 1 - rule_accuracy if rule_coverage > 0 else 0
 
-            # Rule Header
             print(Fore.YELLOW + f"\nRule {i}:")
 
-            # Conditions
             for condition in rule.conds:
                 print(Fore.GREEN + f"  IF {condition}")
 
-            # Class prediction
             print(Fore.MAGENTA + f"  THEN Class = {rule.class_name}")
 
-            # Metrics
             print(
                 Fore.BLUE + f"  [Support: {rule_support}, "
                 f"Accuracy: {rule_accuracy:.2f}, "
@@ -78,8 +57,7 @@ def train_RIPPER_classifier(X_train, y_train):
     print(Fore.CYAN + "\n" + "=" * 50)
     return classifier, ruleset
 
-
-def evaluate_classifier(classifier, X_test, y_test, rules=None):
+def evaluate_classifier(classifier, X_test, y_test, target_name, rules=None):
     """
     Evaluate the trained RIPPER classifier on test data.
 
@@ -92,29 +70,27 @@ def evaluate_classifier(classifier, X_test, y_test, rules=None):
     Returns:
     dict: Classification report as dictionary
     """
-    # Convert numpy arrays to DataFrame if necessary
+    
     if isinstance(X_test, np.ndarray):
         X_test = pd.DataFrame(X_test)
 
-    # Ensure column names match training data
     if X_test.columns.dtype == "int64":
         X_test.columns = [f"feature_{i}" for i in range(len(X_test.columns))]
 
-    # Prepare test data
-    df_test = X_test.copy()
-
     try:
-        # Make predictions
-        y_pred = classifier.predict(df_test)
+        
+        y_pred = classifier.predict(X_test)
 
-        # Generate and display classification report
         report = classification_report(y_test, y_pred, output_dict=True)
         print("\nClassification Report:")
         print(classification_report(y_test, y_pred))
 
-        # Additional rule-specific evaluation if rules are provided
         if rules is not None:
             print("\nRule-specific Performance:")
+            
+            df_test = X_test.copy()
+            df_test[target_name] = y_test
+            
             for i, rule in enumerate(rules.rules, start=1):
                 matches = rules.covers(rule, df_test)
                 if matches.any():
