@@ -45,7 +45,7 @@ def execute_pipeline(
     test: bool = False,
     config_path: str = "config/preprocessing.yaml",
     cache_dir: str = "cache",
-    n_splits: int = 5,
+    n_splits: int = 3,
 ) -> dict:
     """
     Execute the pipeline with caching support.
@@ -56,7 +56,7 @@ def execute_pipeline(
     try:
         logging.info(f"Loading data from {data_path}")
         if test:
-            data = pd.read_excel(data_path, nrows=10)
+            data = pd.read_excel(data_path, nrows=100)
         else:
             data = pd.read_excel(data_path)
         logging.info(f"Loaded {len(data)} rows and {len(data.columns)} columns")

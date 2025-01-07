@@ -4,6 +4,7 @@ import numpy as np
 from datetime import datetime
 from src.preprocessing import DataPreprocessor
 
+
 @pytest.fixture
 def sample_data():
     """Create sample dataset with various data types and scenarios"""
@@ -11,7 +12,6 @@ def sample_data():
         {
             "temperature": [25.5, -99, 27.8, 26.2, -99],
             "humidity": [60, 55, -9, 65, 70],
-            
             "order_date": [
                 "2024-01-01",
                 "2024-01-02",
@@ -26,20 +26,16 @@ def sample_data():
                 "2024-01-06",
                 "2024-01-07",
             ],
-            
             "latitude": [40.7128, 34.0522, 41.8781, 29.7604, 45.5155],
             "longitude": [-74.0060, -118.2437, -87.6298, -95.3698, -122.6789],
-            
             "product_category": ["A", "B", "A", "C", "B"],
             "region": ["North", "South", "North", "East", "West"],
-            
             "status_code": [1, 2, 1, 3, 2],
-            
             "notes": ["good", "-", "excellent", "NA", ""],
-            
             "target": [0, 1, 0, 1, 0],
         }
     )
+
 
 def test_initialization():
     """Test preprocessor initialization"""
@@ -55,22 +51,21 @@ def test_initialization():
     assert preprocessor.date_columns == ["order_date", "shipping_date"]
     assert preprocessor.missing_value_codes["temperature"] == [-99]
 
+
 def test_missing_value_handling(sample_data):
     """Test handling of various missing value formats"""
     preprocessor = DataPreprocessor(
-        missing_value_codes={
-            "-99": ["temperature"],
-            "-9": ["humidity"]
-        }
+        missing_value_codes={"-99": ["temperature"], "-9": ["humidity"]}
     )
-    
+
     processed_data = preprocessor._handle_missing_values(sample_data)
 
     assert pd.isna(processed_data.loc[1, "temperature"])
-    
+
     assert pd.isna(processed_data.loc[2, "humidity"])
-    
+
     assert pd.isna(processed_data.loc[1, "notes"])
+
 
 def test_date_processing(sample_data):
     """Test date feature extraction"""
@@ -87,6 +82,7 @@ def test_date_processing(sample_data):
     assert processed_data.loc[0, "order_date_year"] == 2024
     assert processed_data.loc[0, "order_date_month"] == 1
     assert processed_data.loc[0, "order_date_day"] == 1
+
 
 def test_categorical_encoding():
     """Test categorical encoding with a simple dataset"""
@@ -117,4 +113,3 @@ def test_categorical_encoding():
     assert processed_data["product_category_A"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]
     assert processed_data["region_North"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]
     assert processed_data["status_code_1"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]
-

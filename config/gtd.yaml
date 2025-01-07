@@ -2,9 +2,11 @@ date_columns:
   - iyear
   - imonth
   - iday
+
 coordinate_columns:
   - latitude
   - longitude
+
 numerical_columns:
   - nperps
   - nperpcap
@@ -23,6 +25,7 @@ numerical_columns:
   - ransompaid
   - ransompaidus
   - nreleased
+
 numeric_categorical_columns:
   - extended
   - attacktype1
@@ -75,6 +78,7 @@ numeric_categorical_columns:
   - INT_IDEO
   - INT_MISC
   - INT_ANY
+
 columns_to_exclude: 
   - attacktype1_txt
   - attacktype2_txt
@@ -133,11 +137,15 @@ columns_to_exclude:
   - scite2
   - scite3
   - dbsource
+
 missing_value_codes:
+  
   "4":
     - propextent
+  
   "7":
     - hostkidoutcome
+  
   "-9":
     - doubtterr
     - compclaim
@@ -150,8 +158,10 @@ missing_value_codes:
     - INT_IDEO
     - INT_MISC
     - INT_ANY
+  
   "10":
     - claimmode
+  
   "-99":
     - nhostkid
     - nhostkidus
