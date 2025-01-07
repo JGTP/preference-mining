@@ -4,13 +4,15 @@ import logging
 from pathlib import Path
 from typing import Tuple, Optional
 from src.preprocessing import DataPreprocessor
-from src.classifier import train_RIPPER_classifier, evaluate_classifier
+from src.classifier import cross_validate_RIPPER, analyse_rulesets
+
 
 def setup_logging():
     """Configure logging for the pipeline"""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+
 
 def load_preprocessing_config(config_path: str = "config/preprocessing.yaml") -> dict:
     """
@@ -36,49 +38,24 @@ def load_preprocessing_config(config_path: str = "config/preprocessing.yaml") ->
         logging.error(f"Error parsing config file: {e}")
         raise
 
-def save_processed_data(
-    X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
-    y_train: pd.Series,
-    y_test: pd.Series,
-    output_dir: str = "data/processed",
-) -> None:
-    """Save processed datasets to files"""
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    X_train.to_csv(output_path / "X_train.csv", index=False)
-    X_test.to_csv(output_path / "X_test.csv", index=False)
-    y_train.to_csv(output_path / "y_train.csv", index=False)
-    y_test.to_csv(output_path / "y_test.csv", index=False)
 
 def execute_pipeline(
     data_path: str,
     target_column: str,
     test: bool = False,
     config_path: str = "config/preprocessing.yaml",
-    output_dir: Optional[str] = None,
-    save_intermediate: bool = False,
-) -> Tuple[object, list]:
+    cache_dir: str = "cache",
+    n_splits: int = 5,
+) -> dict:
     """
-    Execute the complete data processing and classification pipeline.
-
-    Args:
-        data_path: Path to the input Excel file
-        config_path: Path to preprocessing configuration file
-        target_column: Name of the target variable column
-        output_dir: Directory to save processed data (if save_intermediate is True)
-        save_intermediate: Whether to save intermediate processed data
-
-    Returns:
-        Tuple of (trained classifier, rules)
+    Execute the pipeline with caching support.
     """
     setup_logging()
     logging.info("Starting pipeline execution")
 
     try:
         logging.info(f"Loading data from {data_path}")
-        if test == True:
+        if test:
             data = pd.read_excel(data_path, nrows=10)
         else:
             data = pd.read_excel(data_path)
@@ -101,39 +78,29 @@ def execute_pipeline(
         numeric_categorical_columns=config.get("numeric_categorical_columns", []),
         columns_to_exclude=config.get("columns_to_exclude", []),
         missing_value_codes=config.get("missing_value_codes", {}),
+        cache_dir=cache_dir,
     )
 
     try:
-        logging.info("Preprocessing data")
+        logging.info("Preprocessing data or loading from cache")
         X_train, X_test, y_train, y_test = preprocessor.preprocess_data(
             data, target_column=target_column
         )
-        logging.info(
-            f"Preprocessed data shapes - X_train: {X_train.shape}, X_test: {X_test.shape}"
-        )
-
-        if save_intermediate and output_dir:
-            logging.info(f"Saving processed data to {output_dir}")
-            save_processed_data(X_train, X_test, y_train, y_test, output_dir)
+        logging.info(f"Data shapes - X_train: {X_train.shape}, X_test: {X_test.shape}")
 
     except Exception as e:
         logging.error(f"Error during preprocessing: {e}")
         raise
 
     try:
-        logging.info("Training RIPPER classifier")
-        classifier, rules = train_RIPPER_classifier(X_train, y_train, target_column)
-        logging.info(f"Generated {len(rules)} rules")
+        logging.info("Performing cross-validation with RIPPER")
+        all_rulesets = cross_validate_RIPPER(
+            X_train, y_train, n_splits=n_splits, target_name=target_column
+        )
+        rule_analysis = analyse_rulesets(all_rulesets)
     except Exception as e:
-        logging.error(f"Error during classifier training: {e}")
-        raise
-
-    try:
-        logging.info("Evaluating classifier")
-        evaluate_classifier(classifier, X_test, y_test, target_column, rules)
-    except Exception as e:
-        logging.error(f"Error during evaluation: {e}")
+        logging.error(f"Error during cross-validation: {e}")
         raise
 
     logging.info("Pipeline execution completed successfully")
-    return classifier, rules
+    return rule_analysis

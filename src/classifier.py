@@ -1,12 +1,14 @@
 import wittgenstein as lw
 from sklearn.metrics import classification_report
+from sklearn.model_selection import KFold
 import pandas as pd
 import numpy as np
 from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-def train_RIPPER_classifier(X_train, y_train, target_name='target'):
+
+def train_RIPPER_classifier(X_train, y_train, target_name="target"):
     """
     Train a RIPPER classifier and display the learned rules with metrics.
 
@@ -17,10 +19,9 @@ def train_RIPPER_classifier(X_train, y_train, target_name='target'):
     Returns:
     tuple: (trained classifier, ruleset)
     """
-    
-    classifier = lw.RIPPER(k=2, prune_size=0.33) 
+    classifier = lw.RIPPER(k=2, prune_size=0.33, verbosity=1)
     try:
-        classifier.fit(trainset=X_train, y=y_train) 
+        classifier.fit(trainset=X_train, y=y_train)
     except Exception as e:
         print(f"Error during training: {str(e)}")
 
@@ -31,7 +32,6 @@ def train_RIPPER_classifier(X_train, y_train, target_name='target'):
 
     print(Fore.CYAN + "\nDecision Rules:\n" + "=" * 50)
     for i, rule in enumerate(ruleset.rules, start=1):
-        
         try:
             rule_support = ruleset.support(rule, df_train, target_name)
             rule_accuracy = ruleset.accuracy(rule, df_train, target_name)
@@ -57,49 +57,58 @@ def train_RIPPER_classifier(X_train, y_train, target_name='target'):
     print(Fore.CYAN + "\n" + "=" * 50)
     return classifier, ruleset
 
-def evaluate_classifier(classifier, X_test, y_test, target_name, rules=None):
+
+def cross_validate_RIPPER(X, y, n_splits=5, target_name="target"):
     """
-    Evaluate the trained RIPPER classifier on test data.
+    Perform cross-validation to extract and analyse consistent rulesets.
 
     Parameters:
-    classifier: Trained RIPPER classifier
-    X_test: Features test data
-    y_test: Target test data
-    rules: Ruleset (optional)
+    X: Features data (numpy array or pandas DataFrame)
+    y: Target data (numpy array or pandas Series)
+    n_splits: Number of folds for cross-validation
+    target_name: Name of the target column
 
     Returns:
-    dict: Classification report as dictionary
+    list: Aggregated rulesets across all folds
     """
-    
-    if isinstance(X_test, np.ndarray):
-        X_test = pd.DataFrame(X_test)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    all_rulesets = []
 
-    if X_test.columns.dtype == "int64":
-        X_test.columns = [f"feature_{i}" for i in range(len(X_test.columns))]
+    for fold, (train_index, test_index) in enumerate(kf.split(X), start=1):
+        print(Fore.CYAN + f"\nFold {fold}/{n_splits}:" + "=" * 40)
+        X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-    try:
-        
-        y_pred = classifier.predict(X_test)
+        classifier, ruleset = train_RIPPER_classifier(X_train, y_train, target_name)
+        all_rulesets.append(ruleset)
 
-        report = classification_report(y_test, y_pred, output_dict=True)
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred))
+    print(Fore.GREEN + "\nCross-Validation Complete\n" + "=" * 50)
+    return all_rulesets
 
-        if rules is not None:
-            print("\nRule-specific Performance:")
-            
-            df_test = X_test.copy()
-            df_test[target_name] = y_test
-            
-            for i, rule in enumerate(rules.rules, start=1):
-                matches = rules.covers(rule, df_test)
-                if matches.any():
-                    correct_predictions = sum(y_test[matches] == rule.class_name)
-                    rule_accuracy = correct_predictions / sum(matches)
-                    print(f"Rule {i} accuracy on test set: {rule_accuracy:.2f}")
 
-        return report
+def analyse_rulesets(all_rulesets):
+    """
+    Analyse rulesets to identify consistent rules across folds.
 
-    except Exception as e:
-        print(f"Error during evaluation: {str(e)}")
-        return None
+    Parameters:
+    all_rulesets: List of rulesets from cross-validation
+
+    Returns:
+    dict: Aggregated rule analysis
+    """
+    rule_summary = {}
+
+    for fold, ruleset in enumerate(all_rulesets, start=1):
+        for rule in ruleset.rules:
+            rule_text = str(rule)
+            if rule_text not in rule_summary:
+                rule_summary[rule_text] = {"support": [], "accuracy": [], "folds": []}
+
+            rule_summary[rule_text]["folds"].append(fold)
+
+    print(Fore.YELLOW + "\nAggregated Rule Analysis:\n" + "=" * 50)
+    for rule_text, metrics in rule_summary.items():
+        print(Fore.CYAN + f"\nRule: {rule_text}")
+        print(Fore.GREEN + f"  Appeared in folds: {metrics['folds']}")
+
+    return rule_summary

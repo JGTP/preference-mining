@@ -8,7 +8,6 @@
             "args": [
                 "main.py",
                 "data/globalterrorismdb_0522dist.xlsx",
-                "--test",
                 "--target",
                 "doubtterr"
             ],

@@ -15,21 +15,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="config/preprocessing.yaml",
+        default="config/gtd.yaml",
         help="Path to preprocessing configuration file",
     )
     parser.add_argument(
         "--target", type=str, default="target", help="Name of target column"
     )
     parser.add_argument(
-        "--output-dir",
-        type=str,
-        help="Directory to save processed data",
-    )
-    parser.add_argument(
-        "--save-intermediate",
-        action="store_true",
-        help="Save intermediate processed data",
+        "--cache_dir", type=str, default="data/cache", help="Name of data cache folder"
     )
 
     args = parser.parse_args()
@@ -39,6 +32,5 @@ if __name__ == "__main__":
         args.target,
         args.test,
         args.config,
-        args.output_dir,
-        args.save_intermediate,
+        args.cache_dir,
     )
