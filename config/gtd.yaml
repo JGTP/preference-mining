@@ -1,11 +1,5 @@
 date_columns:
   - iyear
-  - imonth
-  - iday
-
-coordinate_columns:
-  - latitude
-  - longitude
 
 numerical_columns:
   - nperps
@@ -80,6 +74,7 @@ numeric_categorical_columns:
   - INT_ANY
 
 columns_to_exclude: 
+  - eventid
   - attacktype1_txt
   - attacktype2_txt
   - attacktype3_txt
@@ -95,6 +90,7 @@ columns_to_exclude:
   - natlty2_txt
   - natlty3_txt
   - alternative_txt
+  - country_txt
   - targtype1_txt
   - targsubtype1_txt
   - targtype2_txt
@@ -111,7 +107,7 @@ columns_to_exclude:
   - summary
   - alternative
   - related
-  - province
+  - provstate
   - city
   - location
   - weapdetail
@@ -133,21 +129,25 @@ columns_to_exclude:
   - kidhijcountry
   - ransomnote
   - addnote
-  - scite
+  - scite1
   - scite2
   - scite3
   - dbsource
+  - latitude
+  - longitude
+  - region_txt
+  - addnotes
+  - imonth
+  - iday 
 
 missing_value_codes:
-  
   "4":
     - propextent
-  
   "7":
     - hostkidoutcome
-  
   "-9":
     - doubtterr
+    - claimed
     - compclaim
     - compclaim2
     - compclaim3
@@ -158,14 +158,14 @@ missing_value_codes:
     - INT_IDEO
     - INT_MISC
     - INT_ANY
-  
   "10":
     - claimmode
-  
   "-99":
+    - nperps
+    - nperpcap
     - nhostkid
     - nhostkidus
     - nhours
     - ndays
     - nreleased
-    - 
+    - propvalue

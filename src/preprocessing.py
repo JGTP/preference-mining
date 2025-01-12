@@ -1,9 +1,7 @@
-# preprocessing.py
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
 import hashlib
 import json
@@ -18,18 +16,27 @@ class DataPreprocessor:
         numeric_categorical_columns=None,
         columns_to_exclude=None,
         missing_value_codes=None,
-        cache_dir="cache",
+        cache_dir=None,
+        min_year=None,
+        year_column=None,
+        test_size=None,
+        one_hot_encoding=False,
     ):
-        # Existing initialization code remains the same
         self.date_columns = date_columns or []
         self.coordinate_columns = coordinate_columns or []
         self.categorical_columns = categorical_columns or []
         self.numeric_categorical_columns = numeric_categorical_columns or []
         self.columns_to_exclude = columns_to_exclude or []
         self.missing_value_codes = missing_value_codes or {}
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-
+        self.min_year = min_year
+        self.year_column = year_column
+        self.test_size = test_size
+        self.one_hot_encoding = one_hot_encoding
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.cache_dir = None
         self.label_encoders = {}
         self.onehot_encoder = None
         self.scaler = StandardScaler()
@@ -71,7 +78,7 @@ class DataPreprocessor:
 
     def _generate_cache_key(self, data, target_column):
         """Generate a unique cache key based on data content and preprocessing parameters"""
-        # Create a string containing all relevant parameters
+
         config = {
             "date_columns": sorted(self.date_columns),
             "coordinate_columns": sorted(self.coordinate_columns),
@@ -87,21 +94,17 @@ class DataPreprocessor:
             ).hexdigest(),
         }
 
-        # Create a hash of the configuration
         config_str = json.dumps(config, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()
 
-    def _save_preprocessed_data(self, X_train, X_test, y_train, y_test, cache_key):
+    def _save_preprocessed_data(self, X, y, cache_key):
         """Save preprocessed data and preprocessing objects to cache"""
         cache_path = self.cache_dir / f"{cache_key}"
 
-        # Save the preprocessed data
         joblib.dump(
             {
-                "X_train": X_train,
-                "X_test": X_test,
-                "y_train": y_train,
-                "y_test": y_test,
+                "X": X,
+                "y": y,
                 "onehot_encoder": self.onehot_encoder,
                 "scaler": self.scaler,
                 "target_processor": self.target_processor,
@@ -125,10 +128,8 @@ class DataPreprocessor:
             self.target_type = cached_data["target_type"]
 
             return (
-                cached_data["X_train"],
-                cached_data["X_test"],
-                cached_data["y_train"],
-                cached_data["y_test"],
+                cached_data["X"],
+                cached_data["y"],
             )
         except Exception as e:
             print(f"Error loading cached data: {e}")
@@ -150,21 +151,6 @@ class DataPreprocessor:
             for column in affected_columns:
                 if column in df.columns:
                     df[column] = df[column].replace(numeric_code, np.nan)
-
-        return df
-
-    def _process_dates(self, data):
-        """Extract useful features from date columns."""
-        df = data.copy()
-
-        for col in self.date_columns:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-                df[f"{col}_year"] = df[col].dt.year
-                df[f"{col}_month"] = df[col].dt.month
-                df[f"{col}_day"] = df[col].dt.day
-                df[f"{col}_dayofweek"] = df[col].dt.dayofweek
-                df.drop(columns=[col], inplace=True)
 
         return df
 
@@ -193,9 +179,9 @@ class DataPreprocessor:
 
         for col in self.numeric_categorical_columns:
             if col in df.columns:
-                df[col] = df[col].astype("category")
+                df[col] = df[col].astype("str")
 
-        if categorical_features:
+        if categorical_features and self.one_hot_encoding:
             self.onehot_encoder = OneHotEncoder(
                 sparse_output=False, handle_unknown="ignore"
             )
@@ -215,48 +201,74 @@ class DataPreprocessor:
 
         return df
 
+    def _filter_by_year(self, data):
+        """
+        Filter data to include only records from or after the specified minimum year.
+
+        Args:
+            data (pd.DataFrame): Input DataFrame
+
+        Returns:
+            pd.DataFrame: Filtered DataFrame
+        """
+        if self.min_year is None or self.year_column is None:
+            return data
+
+        if self.year_column not in data.columns:
+            raise ValueError(f"Year column '{self.year_column}' not found in data")
+
+        data[self.year_column] = pd.to_numeric(data[self.year_column], errors="coerce")
+
+        filtered_data = data[data[self.year_column] >= self.min_year].copy()
+
+        print(
+            f"Filtered data from {self.min_year} onwards. "
+            f"Rows before: {len(data)}, Rows after: {len(filtered_data)}"
+        )
+
+        return filtered_data
+
     def preprocess_data(self, data, target_column):
         """
         Main preprocessing pipeline with caching support.
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(data, target_column)
+        if self.cache_dir:
+            cache_key = self._generate_cache_key(data, target_column)
+            cached_result = self._load_preprocessed_data(cache_key)
+            if cached_result is not None:
+                print("Using cached preprocessed data")
+                return cached_result
 
-        # Try to load preprocessed data from cache
-        cached_result = self._load_preprocessed_data(cache_key)
-        if cached_result is not None:
-            print("Using cached preprocessed data")
-            return cached_result
+        print("Cache missing, preprocessing data")
 
-        print("Cache miss - preprocessing data")
-        # If no cached data, perform preprocessing
         df = data.copy()
 
-        if target_column and target_column in df.columns:
-            y = self._preprocess_target(df[target_column].copy())
-            df = df.drop(columns=[target_column])
+        df = self._filter_by_year(df)
+
+        if target_column is not None:
+            if isinstance(target_column, pd.Series):
+                # It's already a pandas series.
+                y = target_column
+            elif target_column and target_column in df.columns:
+                y = self._preprocess_target(df[target_column].copy())
+                df = df.drop(columns=[target_column])
 
         df = df.drop(columns=self.columns_to_exclude, errors="ignore")
 
-        # Existing preprocessing steps
         df = self._handle_missing_values(df)
-        df = self._process_dates(df)
-        df = self._process_coordinates(df)
         df = self._encode_categoricals(df)
+        df = self._process_coordinates(df)
 
-        numerical_columns = df.select_dtypes(include=["float64", "int64"]).columns
-        if len(numerical_columns) > 0:
-            df[numerical_columns] = self.scaler.fit_transform(df[numerical_columns])
+        if self.test_size:
 
-        # Split the data
-        X_train, X_test, y_train, y_test = train_test_split(
-            df, y, test_size=0.2, random_state=42
-        )
+            indices = np.random.choice(len(df), size=self.test_size, replace=False)
+            df = df.iloc[indices]
+            y = y.iloc[indices]
 
-        # Save preprocessed data to cache
-        self._save_preprocessed_data(X_train, X_test, y_train, y_test, cache_key)
+        if self.cache_dir:
+            self._save_preprocessed_data(df, y, cache_key)
 
-        return X_train, X_test, y_train, y_test
+        return df, y
 
     def inverse_transform_target(self, y):
         """

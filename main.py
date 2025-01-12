@@ -8,9 +8,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("data_path", type=str, help="Path to input Excel file")
     parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Whether to truncate the data for testing",
+        "--test_size",
+        type=int,
+        default=None,
     )
     parser.add_argument(
         "--config",
@@ -24,13 +24,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cache_dir", type=str, default="data/cache", help="Name of data cache folder"
     )
+    parser.add_argument(
+        "--min_year", type=int, default=1997, help="Starting year used in filtering"
+    )
 
     args = parser.parse_args()
 
     execute_pipeline(
         args.data_path,
         args.target,
-        args.test,
+        args.test_size,
         args.config,
         args.cache_dir,
+        args.min_year,
     )

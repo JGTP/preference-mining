@@ -13,9 +13,12 @@
             "console": "integratedTerminal",
             "args": [
                 "data/globalterrorismdb_0522dist.xlsx",
-                "--test",
+                "--test_size",
+                "10000",
                 "--target",
-                "doubtterr"
+                "suicide",
+                "--min_year",
+                "1997"
             ]
         }
     ]

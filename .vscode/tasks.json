@@ -9,7 +9,9 @@
                 "main.py",
                 "data/globalterrorismdb_0522dist.xlsx",
                 "--target",
-                "doubtterr"
+                "suicide",
+                "--min_year",
+                "1997"
             ],
             "group": {
                 "kind": "build",

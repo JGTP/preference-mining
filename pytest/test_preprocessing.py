@@ -1,7 +1,6 @@
-import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime
+import pytest
 from src.preprocessing import DataPreprocessor
 
 
@@ -67,23 +66,6 @@ def test_missing_value_handling(sample_data):
     assert pd.isna(processed_data.loc[1, "notes"])
 
 
-def test_date_processing(sample_data):
-    """Test date feature extraction"""
-    preprocessor = DataPreprocessor(date_columns=["order_date", "shipping_date"])
-
-    processed_data = preprocessor._process_dates(sample_data)
-
-    assert "order_date_year" in processed_data.columns
-    assert "order_date_month" in processed_data.columns
-    assert "order_date_day" in processed_data.columns
-
-    assert "order_date" not in processed_data.columns
-
-    assert processed_data.loc[0, "order_date_year"] == 2024
-    assert processed_data.loc[0, "order_date_month"] == 1
-    assert processed_data.loc[0, "order_date_day"] == 1
-
-
 def test_categorical_encoding():
     """Test categorical encoding with a simple dataset"""
     # Create a simple test dataset
@@ -98,6 +80,7 @@ def test_categorical_encoding():
     preprocessor = DataPreprocessor(
         categorical_columns=["product_category", "region"],
         numeric_categorical_columns=["status_code"],
+        one_hot_encoding=True,
     )
 
     processed_data = preprocessor._encode_categoricals(test_data)

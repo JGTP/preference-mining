@@ -1,5 +1,6 @@
 import pandas as pd
-from src.classifier import train_RIPPER_classifier
+
+from src.ripper import train_RIPPER_classifier
 
 
 def test_train_RIPPER_classifier():
@@ -9,9 +10,9 @@ def test_train_RIPPER_classifier():
     df_train = pd.DataFrame(X_train, columns=["feature1", "feature2"])
     df_train["target"] = y_train
 
-    classifier, rules = train_RIPPER_classifier(
+    ripper, rules = train_RIPPER_classifier(
         df_train[["feature1", "feature2"]], df_train["target"]
     )
 
-    assert classifier is not None
+    assert ripper is not None
     assert len(rules) > 0
