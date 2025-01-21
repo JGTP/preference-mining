@@ -1,7 +1,9 @@
+import json
 import pandas as pd
 import yaml
 import logging
 from pathlib import Path
+from datetime import datetime
 from src.black_box import analyze_conditional_importances, train_and_evaluate_model
 from src.ripper import (
     analyse_rulesets_globally,
@@ -9,6 +11,8 @@ from src.ripper import (
     export_analysis_results,
 )
 from src.preprocessing import DataPreprocessor
+from src.feature_set_analysis import analyze_feature_set_differences
+import numpy as np
 
 
 def setup_logging():
@@ -52,10 +56,36 @@ def execute_pipeline(
     min_year=1997,
     n_splits: int = 3,
     output_dir: str = "results",
+    feature_set_config: dict = None,
 ) -> dict:
     """
-    Execute the pipeline with conditional feature importance analysis.
+    Execute the pipeline with conditional feature importance and feature set analysis.
+
+    Args:
+        data_path: Path to input data file
+        target_column: Name of target column
+        test_size: Size of test set
+        config_path: Path to preprocessing configuration
+        cache_dir: Directory for caching preprocessing results
+        min_year: Minimum year to include in analysis
+        n_splits: Number of cross-validation splits
+        output_dir: Directory for output files
+        feature_set_config: Configuration for feature set analysis
+            {
+                "deltas": List[float],  # e.g., [0.1, 0.2, 0.3]
+                "min_set_size": int,    # default: 1
+                "max_set_size": int,    # optional
+                "max_pairs_per_rule": int  # default: 1000
+            }
     """
+    # Set default feature set configuration if none provided
+    if feature_set_config is None:
+        feature_set_config = {
+            "deltas": [0.1, 0.2, 0.3],
+            "min_set_size": 1,
+            "max_pairs_per_rule": 1000,
+        }
+
     # Convert and create output directory
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,9 +93,10 @@ def execute_pipeline(
     # Create subdirectories for different outputs
     feature_importance_dir = output_dir / "feature_importances"
     ruleset_dir = output_dir / "rulesets"
+    feature_sets_dir = output_dir / "feature_sets"
 
-    feature_importance_dir.mkdir(parents=True, exist_ok=True)
-    ruleset_dir.mkdir(parents=True, exist_ok=True)
+    for directory in [feature_importance_dir, ruleset_dir, feature_sets_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
 
     setup_logging()
     logging.info("Starting pipeline execution")
@@ -143,20 +174,86 @@ def execute_pipeline(
             f"Conditional feature importances saved to: {conditional_results['output_path']}"
         )
 
+        # Perform feature set analysis
+        logging.info("Analyzing feature set differences")
+        feature_set_results = analyze_feature_set_differences(
+            conditional_results=conditional_results,
+            deltas=feature_set_config["deltas"],
+            output_dir=feature_sets_dir,
+            min_set_size=feature_set_config.get("min_set_size", 1),
+            max_set_size=feature_set_config.get("max_set_size", None),
+            max_pairs_per_rule=feature_set_config.get("max_pairs_per_rule", 1000),
+        )
+        logging.info(
+            f"Feature set analysis saved to: {feature_set_results['output_path']}"
+        )
+
     except Exception as e:
         logging.error(f"Error during analysis: {e}")
         raise
 
-    logging.info("Pipeline execution completed successfully")
-
+    logging.info("Writing pipeline results")
     pipeline_results = {
         "ruleset_analysis_path": ruleset_path,
         "conditional_importance_path": conditional_results["output_path"],
+        "feature_set_analysis_path": feature_set_results["output_path"],
         "conditional_results": conditional_results["conditional_importances"],
+        "feature_set_results": feature_set_results["results"],
     }
 
-    final_export_paths = export_analysis_results(
-        pipeline_results=pipeline_results, output_dir=output_dir
+    # Export final combined results
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_results_path = output_dir / f"combined_results_{timestamp}.json"
+
+    serialised = convert_to_serializable(
+        {
+            "metadata": {
+                "export_date": datetime.now().isoformat(),
+                "pipeline_version": "1.1",
+                "feature_set_config": feature_set_config,
+            },
+            "summary": {
+                "conditional_importance_location": str(
+                    conditional_results["output_path"]
+                ),
+                "feature_set_analysis_location": str(
+                    feature_set_results["output_path"]
+                ),
+                "total_rules_analyzed": len(
+                    conditional_results["conditional_importances"]
+                ),
+            },
+            "results": pipeline_results,
+        }
     )
 
-    return {**pipeline_results, **final_export_paths}
+    with open(final_results_path, "w") as f:
+        json.dump(
+            serialised,
+            f,
+            indent=2,
+        )
+
+    pipeline_results["final_results_path"] = str(final_results_path)
+    logging.info("Pipeline execution completed successfully")
+    return pipeline_results
+
+
+def convert_to_serializable(obj):
+    """
+    Recursively convert objects in a dictionary to be JSON serializable.
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(element) for element in obj]
+    elif isinstance(obj, Path):
+        return str(obj)  # Convert Path objects to strings
+    else:
+        return obj  # Return the object as is if no conversion is needed

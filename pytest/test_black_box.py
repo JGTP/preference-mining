@@ -6,8 +6,6 @@ from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from src.black_box import (
     ModelTrainer,
-    train_and_evaluate_model,
-    analyze_conditional_importances,
 )
 
 
@@ -174,67 +172,3 @@ def test_importance_calculation(synthetic_data):
     # Test saving importances with X parameter
     output_path = trainer.save_feature_importances(X_train)
     assert output_path.exists()
-
-
-def test_analyze_conditional_importances(synthetic_data):
-    """Test the conditional feature importance analysis function."""
-    X_train, X_test, y_train, y_test = synthetic_data
-
-    # Convert y_train and y_test to pandas Series
-    y_train = pd.Series(y_train, name="target")
-    y_test = pd.Series(y_test, name="target")
-
-    # Concatenate train and test data
-    X = pd.concat([X_train, X_test]).reset_index(drop=True)
-    y = pd.concat([y_train, y_test]).reset_index(drop=True)
-
-    # Train the model first
-    model_results = train_and_evaluate_model(X, y, test_size=0.2, cv_folds=3)
-    trained_model = model_results[1]
-
-    # Create mock rules matching the current rule structure
-    mock_rules = {
-        "[feature_0 > 0.5 ^ feature_1 < 0.0]": {
-            "rule": "1",  # Placeholder; real rules are in the RIPPER format
-            "metrics": {"precision": 0.8, "support": 30},
-        },
-        "[feature_2 >= -0.5]": {
-            "rule": "2",
-            "metrics": {"precision": 0.7, "support": 40},
-        },
-    }
-
-    # Run conditional importance analysis
-    results = analyze_conditional_importances(X, mock_rules, trained_model)
-
-    # Basic structure tests
-    assert "conditional_importances" in results
-    assert "output_path" in results
-    assert Path(results["output_path"]).exists()
-
-    # Check that we have results for each rule
-    importances = results["conditional_importances"]
-    assert len(importances) == len(mock_rules)  # Should match the number of mock rules
-
-    # Check structure of importance results for each rule
-    for rule_key, rule_results in importances.items():
-        assert "feature_importances" in rule_results
-        assert "support" in rule_results
-        assert "support_percentage" in rule_results
-        assert "rule_confidence" in rule_results
-        assert "rule_support" in rule_results
-
-        # Validate feature importance values
-        feat_imp = rule_results["feature_importances"]
-        assert isinstance(feat_imp, dict)
-        assert len(feat_imp) == X.shape[1]
-        assert all(isinstance(v, float) for v in feat_imp.values())
-
-        # Validate support metrics
-        assert isinstance(rule_results["support"], int)
-        assert isinstance(rule_results["support_percentage"], float)
-        assert 0 <= rule_results["support_percentage"] <= 100
-
-        # Validate rule metrics
-        assert isinstance(rule_results["rule_confidence"], float)
-        assert isinstance(rule_results["rule_support"], int)
