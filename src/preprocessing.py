@@ -20,7 +20,7 @@ class DataPreprocessor:
         min_year=None,
         year_column=None,
         test_size=None,
-        one_hot_encoding=False,
+        one_hot_encoding=True,
     ):
         self.date_columns = date_columns or []
         self.coordinate_columns = coordinate_columns or []

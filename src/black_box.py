@@ -10,6 +10,12 @@ from sklearn.metrics import (
     accuracy_score,
     make_scorer,
 )
+from pathlib import Path
+import json
+from datetime import datetime
+import shap
+
+from src.ripper import determine_operator
 
 
 def safe_score(scorer_func):
@@ -32,8 +38,10 @@ class ModelTrainer:
             random_state=42,
         )
         self.scoring = self._define_scoring_metrics()
+        self.feature_names = None
 
     def _define_scoring_metrics(self):
+        """Define scoring metrics with safety wrapper."""
         return {
             "accuracy": make_scorer(safe_score(accuracy_score)),
             "f1": make_scorer(safe_score(f1_score)),
@@ -44,72 +52,142 @@ class ModelTrainer:
 
     def train(self, X_train, y_train):
         """Train the model on the provided training data."""
+        if isinstance(X_train, pd.DataFrame):
+            self.feature_names = X_train.columns.tolist()
+        else:
+            self.feature_names = [f"feature_{i}" for i in range(X_train.shape[1])]
+
         self.model.fit(X_train, y_train)
         return self
 
-    def evaluate_cv(self, X_train, y_train, cv=5):
-        """Perform cross-validation and return the results."""
-        try:
-            cv_results = cross_validate(
-                self.model,
-                X_train,
-                y_train,
-                cv=cv,
-                scoring=self.scoring,
-                return_train_score=True,
-                n_jobs=-1,
+    def evaluate_cv(self, X, y, cv=5):
+        """
+        Perform cross-validation evaluation.
+
+        Args:
+            X: Features matrix
+            y: Target vector
+            cv: Number of cross-validation folds
+
+        Returns:
+            dict: Metric names mapped to (mean, std) tuples
+        """
+        if len(X) == 0 or len(y) == 0:
+            return {metric: (0.0, 0.0) for metric in self.scoring}
+
+        cv_results = cross_validate(self.model, X, y, scoring=self.scoring, cv=cv)
+        return {
+            metric.replace("test_", ""): (np.mean(scores), np.std(scores))
+            for metric, scores in cv_results.items()
+        }
+
+    def evaluate(self, X, y):
+        """
+        Evaluate model on test data.
+
+        Args:
+            X: Features matrix
+            y: Target vector
+
+        Returns:
+            dict: Metric names mapped to scores
+        """
+        predictions = self.predict(X)
+        probas = self.predict_proba(X)
+
+        return {
+            name: scorer._score_func(
+                y, predictions if not scorer._kwargs.get("needs_proba") else probas
             )
-
-            metrics = {}
-            for metric in self.scoring.keys():
-                scores = cv_results[f"test_{metric}"]
-                valid_scores = scores[~np.isnan(scores)]
-                if len(valid_scores) > 0:
-                    mean_score = np.mean(valid_scores)
-                    std_score = np.std(valid_scores) if len(valid_scores) > 1 else 0
-                else:
-                    mean_score = 0.0
-                    std_score = 0.0
-                metrics[metric] = (mean_score, std_score)
-
-            return metrics
-        except Exception as e:
-            print(f"Warning: Cross-validation failed with error: {str(e)}")
-            return {metric: (0.0, 0.0) for metric in self.scoring.keys()}
-
-    def evaluate(self, X_test, y_test):
-        """Evaluate the model on the test set."""
-        try:
-            y_pred = self.model.predict(X_test)
-            y_proba = self.model.predict_proba(X_test)[:, 1]
-
-            return {
-                "accuracy": safe_score(accuracy_score)(y_test, y_pred),
-                "f1": safe_score(f1_score)(y_test, y_pred),
-                "precision": safe_score(precision_score)(y_test, y_pred),
-                "recall": safe_score(recall_score)(y_test, y_pred),
-                "roc_auc": safe_score(roc_auc_score)(y_test, y_proba),
-            }
-        except Exception as e:
-            print(f"Warning: Evaluation failed with error: {str(e)}")
-            return {metric: 0.0 for metric in self.scoring.keys()}
+            for name, scorer in self.scoring.items()
+        }
 
     def predict(self, X):
-        """Make predictions on new data."""
+        """Make predictions on input data."""
         return self.model.predict(X)
 
     def predict_proba(self, X):
-        """Get probability predictions on new data."""
+        """Make probability predictions on input data."""
         return self.model.predict_proba(X)
 
+    def get_shap_feature_importances(self, X):
+        """
+        Calculate SHAP feature importances for the trained model.
 
-def train_and_evaluate_model(X, y, test_size=0.2, random_state=42, cv_folds=5):
+        Args:
+            X: The input dataset (same format as training data).
+
+        Returns:
+            dict: Dictionary containing feature importances and metadata.
+        """
+        if not hasattr(self.model, "predict"):
+            raise ValueError("Model has not been trained yet. Call train() first.")
+
+        # Create a SHAP explainer
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer(X)
+
+        # Calculate mean absolute SHAP values for each feature
+        mean_shap_values = np.abs(shap_values.values).mean(axis=0)
+
+        importance_dict = {
+            "feature_importances": {
+                name: float(importance)
+                for name, importance in zip(self.feature_names, mean_shap_values)
+            },
+            "metadata": {
+                "model_type": self.model.__class__.__name__,
+                "n_features": len(self.feature_names),
+                "feature_names": self.feature_names,
+                "timestamp": datetime.now().isoformat(),
+            },
+        }
+
+        return importance_dict
+
+    def save_feature_importances(self, X, output_dir="results/feature_importances"):
+        """
+        Calculate feature importances and save them to a JSON file.
+
+        Args:
+            X: The input dataset to calculate SHAP values for
+            output_dir: Directory where the JSON file will be saved
+
+        Returns:
+            Path: Path to the saved JSON file
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        importance_dict = self.get_shap_feature_importances(X)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"feature_importances_{timestamp}.json"
+        filepath = output_dir / filename
+
+        # Save to JSON file
+        with open(filepath, "w") as f:
+            json.dump(importance_dict, f, indent=2)
+
+        return filepath
+
+
+def train_and_evaluate_model(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    cv_folds=5,
+    output_dir: str | Path = "results/feature_importances",
+):
     """
     Comprehensive function that:
     1. Splits data into train/test sets
     2. Performs cross-validation on training data
     3. Trains final model on full training data
     4. Evaluates on held-out test set
+    5. Calculates and saves feature importances
 
     Parameters:
     -----------
@@ -123,6 +201,8 @@ def train_and_evaluate_model(X, y, test_size=0.2, random_state=42, cv_folds=5):
         Random state for reproducibility
     cv_folds : int, default=5
         Number of folds for cross-validation
+    output_dir : str or Path, default="results"
+        Directory where feature importances will be saved
 
     Returns:
     --------
@@ -130,9 +210,16 @@ def train_and_evaluate_model(X, y, test_size=0.2, random_state=42, cv_folds=5):
         - 'cv_metrics': Cross-validation results on training data
         - 'test_metrics': Final performance on test set
         - 'model': Trained ModelTrainer instance
-        - 'train_indices': Indices of training data
-        - 'test_indices': Indices of test data
+        - 'feature_importance_path': Path to saved feature importances JSON
     """
+    # Convert output_dir to Path and create it
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate input data
+    if len(X) == 0 or len(y) == 0:
+        raise ValueError("Input data is empty")
+
     # Split the data
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
@@ -162,8 +249,123 @@ def train_and_evaluate_model(X, y, test_size=0.2, random_state=42, cv_folds=5):
     for metric, score in test_metrics.items():
         print(f"{metric:10s}: {score:.3f}")
 
+    # Calculate and save feature importances
+    feature_importance_path = trainer.save_feature_importances(X_train, output_dir)
+    print(f"\nFeature importances saved to: {feature_importance_path}")
+
     return {
         "cv_metrics": cv_metrics,
         "test_metrics": test_metrics,
-        "model": trainer,
+        "feature_importance_path": feature_importance_path,
+    }, trainer
+
+
+def analyze_conditional_importances(
+    X, rules, trained_model, output_dir="results/feature_importances"
+):
+    """
+    Analyze feature importances conditioned on different rules in the ruleset.
+
+    Args:
+        X (pd.DataFrame): Preprocessed feature matrix
+        rules (list): List of rule dictionaries from RIPPER analysis
+        trained_model (ModelTrainer): Already trained model instance from train_and_evaluate_model
+        output_dir (str or Path): Directory to save results
+
+    Returns:
+        dict: Dictionary containing:
+            - conditional_importances: Dict mapping rule conditions to feature importances
+            - output_path: Path to saved results
+    """
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    conditional_importances = {}
+
+    for rule_key, rule_data in rules.items():
+        rule_object = rule_data["rule"]  # Extract the actual Rule object
+        mask = pd.Series(True, index=X.index)
+
+        for condition in rule_object.conds:
+            feature_idx = condition.feature
+            feature_name = X.columns[feature_idx]
+            operator = determine_operator(str(condition))
+            value = convert_to_serializable(condition.val)
+
+            # Apply condition to filter rows
+            if operator == "==":
+                mask &= X[feature_name] == value
+            elif operator == "!=":
+                mask &= X[feature_name] != value
+            elif operator == ">":
+                mask &= X[feature_name] > value
+            elif operator == "<":
+                mask &= X[feature_name] < value
+            elif operator == ">=":
+                mask &= X[feature_name] >= value
+            elif operator == "<=":
+                mask &= X[feature_name] <= value
+
+        # Skip if too few samples match the rule
+        if mask.sum() < 10:
+            continue
+
+        # Get subset of data matching the rule conditions
+        X_subset = X[mask]
+
+        # Calculate SHAP values for this subset
+        importance_dict = trained_model.get_shap_feature_importances(X_subset)
+
+        # Store results with rule information
+        rule_key_clean = f"Rule: {rule_key}"  # Optionally clean up or format the key
+        conditional_importances[rule_key_clean] = {
+            "feature_importances": importance_dict["feature_importances"],
+            "support": int(mask.sum()),
+            "support_percentage": float(mask.sum() / len(X) * 100),
+            "rule_confidence": rule_data["metrics"].get("precision", None),
+            "rule_support": rule_data["metrics"].get("support", None),
+        }
+
+    # Save results
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = output_dir / f"conditional_importances_{timestamp}.json"
+
+    results = {
+        "conditional_importances": conditional_importances,
+        "metadata": {
+            "n_rules_analyzed": len(conditional_importances),
+            "total_samples": len(X),
+            "timestamp": datetime.now().isoformat(),
+        },
     }
+
+    # Convert results to a serializable format
+    serializable_results = convert_to_serializable(results)
+
+    # Write the converted dictionary to JSON
+    with open(output_path, "w") as f:
+        json.dump(serializable_results, f, indent=2)
+
+    return {
+        "conditional_importances": conditional_importances,
+        "output_path": output_path,
+    }
+
+
+def convert_to_serializable(obj):
+    """
+    Recursively convert objects in a dictionary to be JSON serializable.
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(element) for element in obj]
+    else:
+        return obj  # Return the object as is if no conversion is needed

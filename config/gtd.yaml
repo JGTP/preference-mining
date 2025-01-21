@@ -34,7 +34,7 @@ numeric_categorical_columns:
   - weapsubtype3
   - weapsubtype4 
   - success
-  - suicide
+  # - suicide --target
   - claimed
   - claimmode
   - claim2

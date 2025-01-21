@@ -11,7 +11,7 @@
                 "--target",
                 "suicide",
                 "--min_year",
-                "1997"
+                "1997",
             ],
             "group": {
                 "kind": "build",

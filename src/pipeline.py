@@ -2,17 +2,13 @@ import pandas as pd
 import yaml
 import logging
 from pathlib import Path
-from src.black_box import train_and_evaluate_model
+from src.black_box import analyze_conditional_importances, train_and_evaluate_model
 from src.ripper import (
     analyse_rulesets_globally,
     cross_validate_RIPPER,
-    export_ruleset_analysis,
+    export_analysis_results,
 )
 from src.preprocessing import DataPreprocessor
-from src.conditional_importance import (
-    analyze_conditional_importance,
-    export_conditional_importance,
-)
 
 
 def setup_logging():
@@ -58,8 +54,19 @@ def execute_pipeline(
     output_dir: str = "results",
 ) -> dict:
     """
-    Execute the pipeline with caching support and export results.
+    Execute the pipeline with conditional feature importance analysis.
     """
+    # Convert and create output directory
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create subdirectories for different outputs
+    feature_importance_dir = output_dir / "feature_importances"
+    ruleset_dir = output_dir / "rulesets"
+
+    feature_importance_dir.mkdir(parents=True, exist_ok=True)
+    ruleset_dir.mkdir(parents=True, exist_ok=True)
+
     setup_logging()
     logging.info("Starting pipeline execution")
 
@@ -105,49 +112,51 @@ def execute_pipeline(
         all_rulesets = cross_validate_RIPPER(
             X, y, n_splits=n_splits, target_name=target_column
         )
+        # Combine X and y for analysis
+        data_with_target = X.copy()
+        data_with_target[target_column] = y
+
         rule_analysis = analyse_rulesets_globally(
-            all_rulesets, data, target_name=target_column
+            all_rulesets, data_with_target, target_name=target_column
         )
 
         # Export the ruleset analysis
         logging.info("Exporting ruleset analysis to JSON")
         feature_names = X.columns.tolist()
-        export_path = export_ruleset_analysis(rule_analysis, feature_names, output_dir)
-        logging.info(f"Ruleset analysis exported to: {export_path}")
-
-    except Exception as e:
-        logging.error(f"Error during cross-validation or export: {e}")
-        raise
-
-    try:
-        bb_model = train_and_evaluate_model(X, y)
-
-        # Perform conditional importance analysis
-        logging.info("Analyzing conditional feature importance")
-        conditional_results = analyze_conditional_importance(
-            X=X,
-            y=y,
-            ruleset=rule_analysis,
-            model=bb_model,
-            random_state=42,
-            min_subset_size=100,
+        export_paths = export_analysis_results(
+            rule_analysis=rule_analysis,
+            feature_names=feature_names,
+            output_dir=ruleset_dir,
         )
+        ruleset_path = export_paths["ruleset_analysis_path"]
 
-        # Export conditional importance results
-        logging.info("Exporting conditional importance analysis")
-        conditional_export_path = export_conditional_importance(
-            results=conditional_results, output_dir=output_dir
+        # Train black box model
+        logging.info("Training black box model")
+        bb_model, model = train_and_evaluate_model(X, y)
+
+        # Perform conditional feature importance analysis
+        logging.info("Calculating conditional feature importances")
+        conditional_results = analyze_conditional_importances(
+            X, rule_analysis, model, output_dir=feature_importance_dir
         )
         logging.info(
-            f"Conditional importance analysis exported to: {conditional_export_path}"
+            f"Conditional feature importances saved to: {conditional_results['output_path']}"
         )
 
     except Exception as e:
-        logging.error(f"Error during black box analysis or conditional importance: {e}")
+        logging.error(f"Error during analysis: {e}")
         raise
 
     logging.info("Pipeline execution completed successfully")
-    return {
-        "rule_analysis": rule_analysis,
-        "conditional_importance": conditional_results,
+
+    pipeline_results = {
+        "ruleset_analysis_path": ruleset_path,
+        "conditional_importance_path": conditional_results["output_path"],
+        "conditional_results": conditional_results["conditional_importances"],
     }
+
+    final_export_paths = export_analysis_results(
+        pipeline_results=pipeline_results, output_dir=output_dir
+    )
+
+    return {**pipeline_results, **final_export_paths}

@@ -14,7 +14,7 @@
             "args": [
                 "data/globalterrorismdb_0522dist.xlsx",
                 "--test_size",
-                "10000",
+                "2000",
                 "--target",
                 "suicide",
                 "--min_year",

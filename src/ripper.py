@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Dict, Any, List, Union
 import wittgenstein as lw
 from sklearn.metrics import f1_score, precision_score, recall_score
 from sklearn.model_selection import KFold
@@ -250,11 +251,11 @@ def print_ruleset_metrics(ruleset, X_train, y_train, target_name):
 
 def analyse_rulesets_globally(all_rulesets, full_dataset, target_name):
     """
-    Analyze rules across all rulesets with F1-based metrics.
+    Analyse rules across all rulesets with F1-based metrics.
     """
     global_rule_summary = {}
 
-    # Analyze each unique rule across all rulesets
+    # Analyse each unique rule across all rulesets
     for fold, ruleset in enumerate(all_rulesets, start=1):
         for rule in ruleset.rules:
             rule_text = str(rule)
@@ -429,23 +430,29 @@ def convert_to_serializable(obj):
 def format_rule_for_json(rule, metrics, feature_names):
     """
     Format a single rule and its metrics for JSON export.
-
     Args:
         rule: Rule object from wittgenstein
         metrics: Dictionary containing rule metrics
         feature_names: List of feature names
-
     Returns:
         dict: Formatted rule data
     """
-    conditions = [format_rule_condition(cond, feature_names) for cond in rule.conds]
+    conditions = []
+    for cond in rule.conds:
+        feature_name = feature_names[cond.feature]
+        operator = determine_operator(cond)
+        value = convert_to_serializable(cond.val)
+        conditions.append(
+            {"feature": feature_name, "operator": operator, "value": value}
+        )
+
     predicted_class = (
         rule.class_ns_[0] if isinstance(rule.class_ns_, tuple) else rule.class_ns_
     )
 
     return {
-        "if_conditions": conditions,
-        "then_prediction": str(predicted_class),
+        "antecedents": conditions,
+        "consequent": str(predicted_class),
         "metrics": {
             "support": convert_to_serializable(metrics["support"]),
             "precision": round(float(metrics["precision"]), 3),
@@ -461,51 +468,187 @@ def format_rule_for_json(rule, metrics, feature_names):
     }
 
 
-def export_ruleset_analysis(rule_analysis, feature_names, output_dir="results"):
+def determine_operator(cond):
+    """Determine the operator for a condition."""
+    cond_str = str(cond)
+    if "<=" in cond_str:
+        return "<="
+    elif ">=" in cond_str:
+        return ">="
+    elif "=" in cond_str:
+        return "=="
+    elif "<" in cond_str:
+        return "<"
+    elif ">" in cond_str:
+        return ">"
+    return "=="
+
+
+def _path_to_str(obj: Any) -> Any:
     """
-    Export the ruleset analysis to a JSON file.
+    Recursively convert any Path objects to strings in a nested structure.
+
+    Args:
+        obj: Any Python object that might contain Path objects
+
+    Returns:
+        The same structure with all Path objects converted to strings
+    """
+    if isinstance(obj, Path):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {key: _path_to_str(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [_path_to_str(item) for item in obj]
+    return obj
+
+
+def _serialize_for_json(obj: Any) -> Any:
+    """
+    Recursively convert objects to JSON-serializable types.
+    Handles:
+    - Path objects -> str
+    - numpy numeric types -> Python numeric types
+    - nested dictionaries and lists
+
+    Args:
+        obj: Any Python object that might need conversion
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, Path):
+        return str(obj)
+    elif isinstance(
+        obj,
+        (
+            np.int_,
+            np.intc,
+            np.intp,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    ):
+        return int(obj)
+    elif isinstance(obj, (np.float16, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: _serialize_for_json(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [_serialize_for_json(item) for item in obj]
+    return obj
+
+
+def export_analysis_results(
+    rule_analysis: Dict = None,
+    feature_names: List[str] = None,
+    pipeline_results: Dict[str, Any] = None,
+    output_dir: Union[str, Path] = "results",
+    include_conditional_results: bool = True,
+) -> Dict[str, str]:
+    """
+    Export both ruleset analysis and pipeline results to JSON files.
 
     Args:
         rule_analysis: Dictionary containing rule analysis results
         feature_names: List of feature names
-        output_dir: Directory to save the JSON file
+        pipeline_results: Dictionary containing pipeline results including conditional importances
+        output_dir: Directory to save the JSON files
+        include_conditional_results: Whether to include the full conditional results
 
     Returns:
-        str: Path to the exported JSON file
+        Dict[str, str]: Dictionary with paths to the exported files
     """
-    # Create output directory if it doesn't exist
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    # Format all rules and their metrics
-    formatted_rules = []
-    for rule_text, summary in rule_analysis.items():
-        formatted_rule = format_rule_for_json(
-            summary["rule"],
-            {
-                **summary["metrics"],
-                "stability": summary["stability"],
-                "folds": summary["folds"],
-            },
-            feature_names,
-        )
-        formatted_rules.append(formatted_rule)
-
-    # Create export data structure
-    export_data = {
-        "metadata": {
-            "export_date": datetime.now().isoformat(),
-            "total_rules": len(formatted_rules),
-        },
-        "rules": formatted_rules,
-    }
-
-    # Generate filename with timestamp
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"ruleset_analysis_{timestamp}.json"
-    filepath = Path(output_dir) / filename
 
-    # Export to JSON with proper formatting
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(export_data, f, indent=2, ensure_ascii=False)
+    export_paths = {}
 
-    return str(filepath)
+    # Export ruleset analysis if provided
+    if rule_analysis and feature_names:
+        formatted_rules = []
+        for rule_text, summary in rule_analysis.items():
+            formatted_rule = format_rule_for_json(
+                summary["rule"],
+                {
+                    **summary["metrics"],
+                    "stability": summary["stability"],
+                    "folds": summary["folds"],
+                },
+                feature_names,
+            )
+            formatted_rules.append(formatted_rule)
+
+        ruleset_data = {
+            "metadata": {
+                "export_date": datetime.now().isoformat(),
+                "total_rules": len(formatted_rules),
+            },
+            "rules": formatted_rules,
+        }
+
+        ruleset_filename = f"ruleset_analysis_{timestamp}.json"
+        ruleset_filepath = output_dir / ruleset_filename
+
+        with open(ruleset_filepath, "w", encoding="utf-8") as f:
+            json.dump(
+                _serialize_for_json(ruleset_data), f, indent=2, ensure_ascii=False
+            )
+
+        export_paths["ruleset_analysis_path"] = str(ruleset_filepath)
+
+    # Export pipeline results if provided
+    if pipeline_results:
+        # Convert any non-serializable objects in pipeline_results
+        pipeline_results = _serialize_for_json(pipeline_results)
+
+        pipeline_data = {
+            "metadata": {
+                "export_date": datetime.now().isoformat(),
+                "pipeline_version": "1.0",
+            },
+            "summary": {},
+        }
+
+        # Include ruleset path if it was just created
+        if "ruleset_analysis_path" in export_paths:
+            pipeline_data["summary"]["ruleset_location"] = export_paths[
+                "ruleset_analysis_path"
+            ]
+
+        # Add conditional importance information
+        if "conditional_importance_path" in pipeline_results:
+            pipeline_data["summary"]["conditional_importance_location"] = (
+                pipeline_results["conditional_importance_path"]
+            )
+
+        if include_conditional_results and "conditional_results" in pipeline_results:
+            pipeline_data["conditional_results"] = pipeline_results[
+                "conditional_results"
+            ]
+            pipeline_data["summary"]["total_rules_analyzed"] = len(
+                pipeline_results["conditional_results"]
+            )
+
+        pipeline_filename = f"pipeline_results_{timestamp}.json"
+        pipeline_folder = output_dir / "intermediate"
+        pipeline_folder.mkdir(parents=True, exist_ok=True)
+        pipeline_filepath = pipeline_folder / pipeline_filename
+
+        with open(pipeline_filepath, "w", encoding="utf-8") as f:
+            json.dump(
+                _serialize_for_json(pipeline_data), f, indent=2, ensure_ascii=False
+            )
+
+        export_paths["pipeline_results_path"] = str(pipeline_filepath)
+
+    return export_paths
