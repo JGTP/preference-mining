@@ -261,71 +261,54 @@ def train_and_evaluate_model(
 
 
 def analyze_conditional_importances(
-    X, rules, trained_model, output_dir="results/feature_importances"
+    X, rule_analysis, trained_model, output_dir="results/feature_importances"
 ):
-    """
-    Analyze feature importances conditioned on different rules in the ruleset.
-
-    Args:
-        X (pd.DataFrame): Preprocessed feature matrix
-        rules (list): List of rule dictionaries from RIPPER analysis
-        trained_model (ModelTrainer): Already trained model instance from train_and_evaluate_model
-        output_dir (str or Path): Directory to save results
-
-    Returns:
-        dict: Dictionary containing:
-            - conditional_importances: Dict mapping rule conditions to feature importances
-            - output_path: Path to saved results
-    """
-
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     conditional_importances = {}
 
-    for rule_key, rule_data in rules.items():
-        rule_object = rule_data["rule"]  # Extract the actual Rule object
-        mask = pd.Series(True, index=X.index)
+    for ruleset_key, ruleset_data in rule_analysis.items():
+        for rule_idx, rule_object in enumerate(ruleset_data["rules"]):
+            mask = pd.Series(True, index=X.index)
 
-        for condition in rule_object.conds:
-            feature_idx = condition.feature
-            feature_name = X.columns[feature_idx]
-            operator = determine_operator(str(condition))
-            value = convert_to_serializable(condition.val)
+            for condition in rule_object.conds:
+                feature_idx = condition.feature
+                feature_name = X.columns[feature_idx]
+                operator = determine_operator(str(condition))
+                value = convert_to_serializable(condition.val)
 
-            # Apply condition to filter rows
-            if operator == "==":
-                mask &= X[feature_name] == value
-            elif operator == "!=":
-                mask &= X[feature_name] != value
-            elif operator == ">":
-                mask &= X[feature_name] > value
-            elif operator == "<":
-                mask &= X[feature_name] < value
-            elif operator == ">=":
-                mask &= X[feature_name] >= value
-            elif operator == "<=":
-                mask &= X[feature_name] <= value
+                # Apply condition to filter rows
+                if operator == "==":
+                    mask &= X[feature_name] == value
+                elif operator == "!=":
+                    mask &= X[feature_name] != value
+                elif operator == ">":
+                    mask &= X[feature_name] > value
+                elif operator == "<":
+                    mask &= X[feature_name] < value
+                elif operator == ">=":
+                    mask &= X[feature_name] >= value
+                elif operator == "<=":
+                    mask &= X[feature_name] <= value
 
-        # Skip if too few samples match the rule
-        if mask.sum() < 10:
-            continue
+            # Skip if too few samples match the rule
+            if mask.sum() < 10:
+                continue
 
-        # Get subset of data matching the rule conditions
-        X_subset = X[mask]
+            # Get subset of data matching the rule conditions
+            X_subset = X[mask]
 
-        # Calculate SHAP values for this subset
-        importance_dict = trained_model.get_shap_feature_importances(X_subset)
+            # Calculate SHAP values for this subset
+            importance_dict = trained_model.get_shap_feature_importances(X_subset)
 
-        # Store results with rule information
-        rule_key_clean = f"Rule: {rule_key}"  # Optionally clean up or format the key
-        conditional_importances[rule_key_clean] = {
-            "feature_importances": importance_dict["feature_importances"],
-            "support": int(mask.sum()),
-            "support_percentage": float(mask.sum() / len(X) * 100),
-            "rule_confidence": rule_data["metrics"].get("precision", None),
-            "rule_support": rule_data["metrics"].get("support", None),
-        }
+            # Create a unique key for each rule
+            rule_key = f"Ruleset {ruleset_key} - Rule {rule_idx}"
+            conditional_importances[rule_key] = {
+                "feature_importances": importance_dict["feature_importances"],
+                "support": int(mask.sum()),
+                "support_percentage": float(mask.sum() / len(X) * 100),
+            }
 
     # Save results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

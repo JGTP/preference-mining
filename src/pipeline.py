@@ -140,9 +140,7 @@ def execute_pipeline(
 
     try:
         logging.info("Performing cross-validation with RIPPER")
-        all_rulesets = cross_validate_RIPPER(
-            X, y, n_splits=n_splits, target_name=target_column
-        )
+        all_rulesets = cross_validate_RIPPER(X, y, n_splits=n_splits)
         # Combine X and y for analysis
         data_with_target = X.copy()
         data_with_target[target_column] = y
