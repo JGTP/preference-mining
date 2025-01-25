@@ -1,196 +1,186 @@
-import datetime
-from itertools import combinations
-from typing import Dict, List, Optional, Set, Tuple
-import numpy as np
 from dataclasses import dataclass
-import logging
-from pathlib import Path
-import json
+from typing import List, Dict, Optional, Set
+import numpy as np
+import pandas as pd
+from itertools import combinations
+import shap
+from src.utils import save_json_results
 
 
 @dataclass
-class FeatureSetComparison:
-    better_set: Set[str]
-    worse_set: Set[str]
-    better_importance: float
-    worse_importance: float
+class FeatureSetResult:
+    set1: Set[str]
+    set2: Set[str]
+    set1_importance: float
+    set2_importance: float
     importance_difference: float
+    max_correlation_set1: float
+    max_correlation_set2: float
 
 
-class FeatureSetAnalyzer:
-    def __init__(self, min_set_size: int = 1, max_set_size: Optional[int] = 5):
-        """
-        Initialize the analyzer with constraints on feature set sizes.
-
-        Args:
-            min_set_size: Minimum number of features in a set (default: 1)
-            max_set_size: Maximum number of features in a set (optional)
-        """
-        self.min_set_size = min_set_size
+class EnhancedFeatureAnalyzer:
+    def __init__(
+        self,
+        model,
+        X: pd.DataFrame,
+        epsilons: List[float] = None,
+        deltas: List[float] = None,
+        max_set_size: int = 10,
+        progress_logger: Optional[object] = None,
+    ):
+        self.model = model
+        self.X = X
+        self.epsilons = epsilons or [i / 20 for i in range(1, 11)]
+        self.deltas = deltas or [0.05, 0.10, 0.15, 0.20, 0.25]
         self.max_set_size = max_set_size
+        self.feature_names = X.columns.tolist()
+        self.correlation_matrix = X.corr()
+        self.progress_logger = progress_logger
 
-    def _normalize_importances(self, importances: Dict[str, float]) -> Dict[str, float]:
-        """Normalize SHAP values to sum to 1."""
-        total = sum(importances.values())
-        return (
-            {k: v / total for k, v in importances.items()} if total > 0 else importances
-        )
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer(self.X)
+        self.shap_scale = np.abs(shap_values.values).mean()
+        self.deltas = [p * self.shap_scale for p in self.deltas]
 
-    def _calculate_set_importance(
-        self, feature_set: Set[str], normalized_importances: Dict[str, float]
-    ) -> float:
-        """Calculate the aggregated importance for a set of features."""
-        return sum(normalized_importances.get(feature, 0) for feature in feature_set)
+    def _get_conditional_data(self, rule) -> pd.DataFrame:
+        mask = pd.Series(True, index=self.X.index)
+        for condition in rule.conds:
+            feature_idx = condition.feature
+            feature_name = self.feature_names[feature_idx]
+            operator = str(condition)
+            value = condition.val
 
-    def _generate_valid_sets(self, features: List[str]) -> List[Set[str]]:
-        """
-        Generate valid feature sets efficiently using itertools.combinations.
-        Only generates sets within the specified size constraints.
-        """
-        max_size = self.max_set_size or len(features)
-        valid_sets = []
+            if "<=" in operator:
+                mask &= self.X[feature_name] <= value
+            elif ">=" in operator:
+                mask &= self.X[feature_name] >= value
+            elif "=" in operator:
+                mask &= self.X[feature_name] == value
+            elif "<" in operator:
+                mask &= self.X[feature_name] < value
+            elif ">" in operator:
+                mask &= self.X[feature_name] > value
 
-        for size in range(self.min_set_size, max_size + 1):
-            valid_sets.extend(set(combo) for combo in combinations(features, size))
+        return self.X[mask]
 
-            # Early stopping if we have too many sets
-            if len(valid_sets) > 10000:
-                logging.warning(
-                    "Large number of feature sets generated. Consider reducing max_set_size."
-                )
-                break
-
-        return valid_sets
-
-    def find_significant_pairs(
-        self, importances: Dict[str, float], delta: float, max_pairs: int = None
-    ) -> List[FeatureSetComparison]:
-        """
-        Find pairs of feature sets where one significantly outperforms the other.
-
-        Args:
-            importances: Dictionary of feature importance scores
-            delta: Minimum difference in importance required
-            max_pairs: Maximum number of pairs to return (None means no limit)
-
-        Returns:
-            List of FeatureSetComparison objects
-        """
-        normalized_importances = self._normalize_importances(importances)
-        features = list(normalized_importances.keys())
-
-        # Generate all valid feature sets
-        feature_sets = self._generate_valid_sets(features)
-
-        # Sort sets by their importance for early stopping optimization
-        sets_with_importance = [
-            (s, self._calculate_set_importance(s, normalized_importances))
-            for s in feature_sets
-        ]
-        sets_with_importance.sort(key=lambda x: x[1], reverse=True)
-
-        significant_pairs = []
-
-        # Compare sets efficiently by starting with highest importance sets
-        for i, (set_b, importance_b) in enumerate(sets_with_importance):
-            # Early stopping if we have enough pairs
-            if max_pairs is not None and len(significant_pairs) >= max_pairs:
-                break
-
-            for set_w, importance_w in sets_with_importance[i + 1 :]:
-
-                # Skip if sets overlap
-                if set_b & set_w:
-                    continue
-
-                # Skip if difference isn't large enough
-                difference = importance_b - importance_w
-                if difference <= delta:
-                    continue
-
-                significant_pairs.append(
-                    FeatureSetComparison(
-                        better_set=set_b,
-                        worse_set=set_w,
-                        better_importance=importance_b,
-                        worse_importance=importance_w,
-                        importance_difference=difference,
-                    )
-                )
-
-                if len(significant_pairs) >= max_pairs:
-                    break
-                if max_pairs is not None and len(significant_pairs) >= max_pairs:
-                    break
-
-        return significant_pairs
-
-
-def analyze_feature_set_differences(
-    conditional_results: Dict,
-    deltas: List[float],
-    output_dir: Path,
-    min_set_size: int = 1,
-    max_set_size: Optional[int] = 5,
-    max_pairs_per_rule: int = None,
-) -> Dict:
-    """
-    Analyze feature set differences across multiple rules and delta values.
-
-    Args:
-        conditional_results: Dictionary containing rule-wise feature importances
-        deltas: List of delta values to test
-        output_dir: Directory to save results
-        min_set_size: Minimum size of feature sets
-        max_set_size: Maximum size of feature sets
-        max_pairs_per_rule: Maximum number of pairs to find per rule
-
-    Returns:
-        Dictionary containing analysis results and export paths
-    """
-    analyzer = FeatureSetAnalyzer(min_set_size=min_set_size, max_set_size=max_set_size)
-    results = {}
-
-    for rule_name, rule_data in conditional_results["conditional_importances"].items():
-        importances = rule_data["feature_importances"]
-        rule_results = {}
-
-        for delta in deltas:
-            significant_pairs = analyzer.find_significant_pairs(
-                importances=importances, delta=delta, max_pairs=max_pairs_per_rule
-            )
-
-            # Convert to serializable format
-            rule_results[str(delta)] = [
-                {
-                    "better_set": list(pair.better_set),
-                    "worse_set": list(pair.worse_set),
-                    "better_importance": pair.better_importance,
-                    "worse_importance": pair.worse_importance,
-                    "importance_difference": pair.importance_difference,
-                }
-                for pair in significant_pairs
-            ]
-
-        results[rule_name] = rule_results
-
-    # Export results
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = output_dir / f"feature_set_differences_{timestamp}.json"
-
-    with open(output_path, "w") as f:
-        json.dump(
-            {
-                "metadata": {
-                    "export_date": datetime.datetime.now().isoformat(),
-                    "deltas_analyzed": deltas,
-                    "min_set_size": min_set_size,
-                    "max_set_size": max_set_size,
-                },
-                "results": results,
+    def analyze_ruleset(self, ruleset, output_dir=None) -> Dict:
+        results = {
+            "rule_analyses": {},
+            "metadata": {
+                "epsilons": self.epsilons,
+                "deltas": self.deltas,
+                "shap_scale": float(self.shap_scale),
+                "max_set_size": self.max_set_size,
+                "total_features": len(self.feature_names),
             },
-            f,
-            indent=2,
+        }
+
+        for i, rule in enumerate(ruleset):
+            rule_results = self.analyze_rule(rule)
+            if rule_results:
+                results["rule_analyses"][f"rule_{i}"] = {
+                    "rule_string": str(rule),
+                    "analysis": rule_results,
+                }
+
+            if self.progress_logger:
+                try:
+                    self.progress_logger.update_progress("analysis", 1)
+                except Exception:
+                    pass
+
+        if output_dir:
+            output_path = save_json_results(results, output_dir, "feature_analysis")
+            results["output_path"] = output_path
+
+        return results
+
+    def _calculate_shap_values(self, data: pd.DataFrame) -> Dict[str, float]:
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer(data)
+        mean_shap = np.abs(shap_values.values).mean(axis=0)
+        return dict(zip(self.feature_names, mean_shap))
+
+    def _check_correlation_threshold(
+        self, feature_set: Set[str], epsilon: float
+    ) -> bool:
+        if len(feature_set) < 2:
+            return True
+        feature_pairs = combinations(feature_set, 2)
+        return all(
+            abs(self.correlation_matrix.loc[f1, f2]) <= epsilon
+            for f1, f2 in feature_pairs
         )
 
-    return {"output_path": str(output_path), "results": results}
+    def _aggregate_importance(
+        self, feature_set: Set[str], importances: Dict[str, float]
+    ) -> float:
+        return sum(importances.get(feature, 0) for feature in feature_set)
+
+    def analyze_rule(self, rule) -> Dict:
+        conditional_data = self._get_conditional_data(rule)
+        if len(conditional_data) < 10:
+            return {}
+
+        shap_values = self._calculate_shap_values(conditional_data)
+        all_features = set(self.feature_names)
+        results = {}
+
+        for epsilon in self.epsilons:
+            for delta in self.deltas:
+                delta = delta / self.shap_scale * 100
+                valid_pairs = []
+
+                for size in range(1, self.max_set_size + 1):
+                    feature_sets = [
+                        set(combo)
+                        for combo in combinations(all_features, size)
+                        if self._check_correlation_threshold(set(combo), epsilon)
+                    ]
+
+                    for set1, set2 in combinations(feature_sets, 2):
+                        if not set1.intersection(set2):
+                            imp1 = self._aggregate_importance(set1, shap_values)
+                            imp2 = self._aggregate_importance(set2, shap_values)
+                            if imp1 - imp2 > delta:
+                                valid_pairs.append(
+                                    FeatureSetResult(
+                                        set1=set1,
+                                        set2=set2,
+                                        set1_importance=imp1,
+                                        set2_importance=imp2,
+                                        importance_difference=imp1 - imp2,
+                                        max_correlation_set1=(
+                                            max(
+                                                abs(self.correlation_matrix.loc[f1, f2])
+                                                for f1, f2 in combinations(set1, 2)
+                                            )
+                                            if len(set1) > 1
+                                            else 0
+                                        ),
+                                        max_correlation_set2=(
+                                            max(
+                                                abs(self.correlation_matrix.loc[f1, f2])
+                                                for f1, f2 in combinations(set2, 2)
+                                            )
+                                            if len(set2) > 1
+                                            else 0
+                                        ),
+                                    )
+                                )
+
+                if valid_pairs:
+                    results[f"epsilon_{epsilon}_delta_{delta:.1f}%"] = [
+                        {
+                            "set1": list(pair.set1),
+                            "set2": list(pair.set2),
+                            "set1_importance": float(pair.set1_importance),
+                            "set2_importance": float(pair.set2_importance),
+                            "importance_difference": float(pair.importance_difference),
+                            "max_correlation_set1": float(pair.max_correlation_set1),
+                            "max_correlation_set2": float(pair.max_correlation_set2),
+                        }
+                        for pair in valid_pairs
+                    ]
+
+        return results

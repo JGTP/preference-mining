@@ -1,7 +1,4 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -14,11 +11,27 @@
             "args": [
                 "data/globalterrorismdb_0522dist.xlsx",
                 "--test_size",
-                "2000",
-                "--target",
-                "suicide",
+                "1000",
                 "--min_year",
-                "1997"
+                "1997",
+                "--n_splits",
+                "2",
+                "--max_set_size",
+                "3",
+                "--epsilon_start",
+                "0.40",
+                "--epsilon_end",
+                "0.50",
+                "--epsilon_step",
+                "0.10",
+                "--delta_start",
+                "0.40",
+                "--delta_end",
+                "0.50",
+                "--delta_step",
+                "0.10",
+                "--output_dir",
+                "results"
             ]
         }
     ]

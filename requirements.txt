@@ -1,9 +1,0 @@
-numpy
-pandas
-scikit-learn
-wittgenstein
-openpyxl
-pytest
-colorama
-pyyaml
-shap

@@ -1,40 +1,78 @@
+import numpy as np
 from src.pipeline import execute_pipeline
 import argparse
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(
-        description="Execute data processing and classification pipeline"
-    )
-    parser.add_argument("data_path", type=str, help="Path to input Excel file")
+    parser = argparse.ArgumentParser(description="Execute analysis pipeline")
+    parser.add_argument("data_path", help="Path to input Excel file")
+    parser.add_argument("--test_size", type=int, default=None)
     parser.add_argument(
-        "--test_size",
-        type=int,
-        default=None,
+        "--config", default="config/gtd.yaml", help="Path to config file"
     )
+    parser.add_argument("--cache_dir", default="data/cache", help="Cache directory")
     parser.add_argument(
-        "--config",
-        type=str,
-        default="config/gtd.yaml",
-        help="Path to preprocessing configuration file",
+        "--min_year", type=int, default=1997, help="Starting year for filtering"
     )
+    parser.add_argument("--output_dir", default="results", help="Output directory")
+    parser.add_argument("--n_splits", type=int, default=3, help="Number of CV splits")
     parser.add_argument(
-        "--target", type=str, default="target", help="Name of target column"
+        "--max_set_size", type=int, default=10, help="Maximum feature set size"
     )
     parser.add_argument(
-        "--cache_dir", type=str, default="data/cache", help="Name of data cache folder"
+        "--epsilon_start", type=float, default=0.05, help="Starting epsilon value"
     )
     parser.add_argument(
-        "--min_year", type=int, default=1997, help="Starting year used in filtering"
+        "--epsilon_end", type=float, default=0.50, help="Ending epsilon value"
     )
-
+    parser.add_argument(
+        "--epsilon_step", type=float, default=0.05, help="Epsilon step size"
+    )
+    parser.add_argument(
+        "--delta_start",
+        type=float,
+        default=0.05,
+        help="Starting delta percentage",
+    )
+    parser.add_argument(
+        "--delta_end",
+        type=float,
+        default=0.25,
+        help="Ending delta percentage",
+    )
+    parser.add_argument(
+        "--delta_step",
+        type=float,
+        default=0.05,
+        help="Delta percentage step size",
+    )
     args = parser.parse_args()
 
+    epsilons = list(
+        np.arange(
+            args.epsilon_start, args.epsilon_end + args.epsilon_step, args.epsilon_step
+        )
+    )
+    deltas = list(
+        np.arange(
+            args.delta_start,
+            args.delta_end + args.delta_step,
+            args.delta_step,
+        )
+    )
+
+    analysis_config = {
+        "epsilons": epsilons,
+        "deltas": deltas,
+        "max_set_size": args.max_set_size,
+    }
+
     execute_pipeline(
-        args.data_path,
-        args.target,
-        args.test_size,
-        args.config,
-        args.cache_dir,
-        args.min_year,
+        data_path=args.data_path,
+        test_size=args.test_size,
+        config_path=args.config,
+        cache_dir=args.cache_dir,
+        min_year=args.min_year,
+        n_splits=args.n_splits,
+        output_dir=args.output_dir,
+        analysis_config=analysis_config,
     )

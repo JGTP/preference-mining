@@ -26,8 +26,6 @@ numerical_columns:
 numeric_categorical_columns:
   - extended
   - attacktype1
-  
-columns_to_exclude: 
   - attacktype2
   - attacktype3
   - weaptype1
@@ -76,6 +74,8 @@ columns_to_exclude:
   - INT_IDEO
   - INT_MISC
   - INT_ANY
+
+columns_to_exclude: 
   - eventid
   - attacktype1_txt
   - attacktype2_txt
