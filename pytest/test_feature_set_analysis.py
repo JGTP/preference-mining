@@ -47,10 +47,75 @@ def test_initialization(analyzer):
     assert hasattr(analyzer, "shap_scale")
 
 
+def test_shap_cache(analyzer, sample_data):
+    # First call should compute and cache
+    result1 = analyzer._calculate_shap_values(sample_data)
+    cache_size1 = len(analyzer._shap_cache)
+    assert cache_size1 > 0
+
+    # Second call should use cache
+    result2 = analyzer._calculate_shap_values(sample_data)
+    cache_size2 = len(analyzer._shap_cache)
+    assert cache_size2 == cache_size1
+    assert result1 == result2
+
+
+def test_feature_combinations_precomputation(analyzer):
+    assert hasattr(analyzer, "feature_combinations")
+    assert len(analyzer.feature_combinations) == analyzer.max_set_size
+    for size in range(1, analyzer.max_set_size + 1):
+        assert isinstance(analyzer.feature_combinations[size], list)
+        assert all(
+            isinstance(combo, set) for combo in analyzer.feature_combinations[size]
+        )
+
+
+def test_parallel_rule_analysis(analyzer):
+    class MockRule:
+        def __init__(self):
+            self.conds = []
+
+        def __str__(self):
+            return "mock_rule"
+
+    # Create multiple rules to test parallel processing
+    ruleset = [MockRule() for _ in range(5)]
+    result = analyzer.analyze_ruleset(ruleset)
+
+    assert isinstance(result, dict)
+    assert "rule_analyses" in result
+    assert len(result["rule_analyses"]) <= len(ruleset)
+
+
 def test_correlation_threshold(analyzer):
-    feature_set = {"feature_a", "feature_b"}
-    result = analyzer._check_correlation_threshold(feature_set, epsilon=0.5)
-    assert isinstance(result, bool)
+    # Create test data with known correlations
+    test_data = pd.DataFrame(
+        {
+            "a": [1, 2, 3, 4],
+            "b": [2, 4, 6, 8],  # perfectly correlated with 'a'
+            "c": [1, 3, 2, 4],  # moderately correlated
+            "d": [-1, -2, -3, -4],  # negatively correlated with 'a'
+        }
+    )
+    analyzer.correlation_matrix = test_data.corr()
+
+    # Test strongly correlated pair (should fail threshold)
+    assert not analyzer._check_correlation_threshold({"a", "b"}, epsilon=0.5)
+
+    # Test weakly correlated pair (should pass threshold)
+    assert analyzer._check_correlation_threshold({"a", "c"}, epsilon=0.9)
+
+    # Test negatively correlated pair (should fail threshold)
+    assert not analyzer._check_correlation_threshold({"a", "d"}, epsilon=0.5)
+
+    # Test larger set with mixed correlations
+    assert not analyzer._check_correlation_threshold({"a", "b", "c"}, epsilon=0.5)
+
+    # Test single feature (should always pass)
+    assert analyzer._check_correlation_threshold({"a"}, epsilon=0.5)
+
+    # Test empty set (should pass)
+    assert analyzer._check_correlation_threshold(set(), epsilon=0.5)
 
 
 def test_aggregate_importance(analyzer):

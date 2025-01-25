@@ -43,7 +43,8 @@ def save_json_results(data, output_dir, filename_prefix):
 
 
 def evaluate_model(y_true, y_pred, y_proba=None):
-    """Standarf1_scorealuation metrics across model types."""
+    """Standard metrics across model types."""
+    print("evaluating model")
     metrics = {
         "accuracy": accuracy_score(y_true, y_pred),
         "f1": f1_score(y_true, y_pred),

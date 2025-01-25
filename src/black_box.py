@@ -52,7 +52,8 @@ class ModelTrainer:
             raise ValueError("Model has not been trained yet. Call train() first.")
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer(X)
-        mean_shap_values = np.abs(shap_values.values).mean(axis=0)
+        squared_shap = np.square(shap_values.values)
+        mean_shap_values = squared_shap.mean(axis=0)
         importance_dict = {
             "feature_importances": {
                 name: float(importance)

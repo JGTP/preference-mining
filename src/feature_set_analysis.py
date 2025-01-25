@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 import shap
+from concurrent.futures import ThreadPoolExecutor
 from src.utils import save_json_results
 
 
@@ -36,81 +37,47 @@ class EnhancedFeatureAnalyzer:
         self.feature_names = X.columns.tolist()
         self.correlation_matrix = X.corr()
         self.progress_logger = progress_logger
+        self._shap_cache = {}
+
+        # Precompute feature combinations
+        self.feature_combinations = {}
+        all_features = set(self.feature_names)
+        for size in range(1, self.max_set_size + 1):
+            self.feature_combinations[size] = [
+                set(combo) for combo in combinations(all_features, size)
+            ]
 
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer(self.X)
         self.shap_scale = np.abs(shap_values.values).mean()
         self.deltas = [p * self.shap_scale for p in self.deltas]
 
-    def _get_conditional_data(self, rule) -> pd.DataFrame:
-        mask = pd.Series(True, index=self.X.index)
-        for condition in rule.conds:
-            feature_idx = condition.feature
-            feature_name = self.feature_names[feature_idx]
-            operator = str(condition)
-            value = condition.val
-
-            if "<=" in operator:
-                mask &= self.X[feature_name] <= value
-            elif ">=" in operator:
-                mask &= self.X[feature_name] >= value
-            elif "=" in operator:
-                mask &= self.X[feature_name] == value
-            elif "<" in operator:
-                mask &= self.X[feature_name] < value
-            elif ">" in operator:
-                mask &= self.X[feature_name] > value
-
-        return self.X[mask]
-
-    def analyze_ruleset(self, ruleset, output_dir=None) -> Dict:
-        results = {
-            "rule_analyses": {},
-            "metadata": {
-                "epsilons": self.epsilons,
-                "deltas": self.deltas,
-                "shap_scale": float(self.shap_scale),
-                "max_set_size": self.max_set_size,
-                "total_features": len(self.feature_names),
-            },
-        }
-
-        for i, rule in enumerate(ruleset):
-            rule_results = self.analyze_rule(rule)
-            if rule_results:
-                results["rule_analyses"][f"rule_{i}"] = {
-                    "rule_string": str(rule),
-                    "analysis": rule_results,
-                }
-
-            if self.progress_logger:
-                try:
-                    self.progress_logger.update_progress("analysis", 1)
-                except Exception:
-                    pass
-
-        if output_dir:
-            output_path = save_json_results(results, output_dir, "feature_analysis")
-            results["output_path"] = output_path
-
-        return results
-
     def _calculate_shap_values(self, data: pd.DataFrame) -> Dict[str, float]:
+        """Calculate SHAP values with caching based on data shape and content hash."""
+        # Create a cache key based on data shape and a simple hash of values
+        cache_key = (data.shape[0], hash(str(data.values.tobytes())))
+
+        if cache_key in self._shap_cache:
+            return self._shap_cache[cache_key]
+
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer(data)
         mean_shap = np.abs(shap_values.values).mean(axis=0)
-        return dict(zip(self.feature_names, mean_shap))
+        result = dict(zip(self.feature_names, mean_shap))
+
+        self._shap_cache[cache_key] = result
+        return result
 
     def _check_correlation_threshold(
         self, feature_set: Set[str], epsilon: float
     ) -> bool:
         if len(feature_set) < 2:
             return True
-        feature_pairs = combinations(feature_set, 2)
-        return all(
-            abs(self.correlation_matrix.loc[f1, f2]) <= epsilon
-            for f1, f2 in feature_pairs
-        )
+        feature_list = list(feature_set)
+        corr_subset = self.correlation_matrix.loc[feature_list, feature_list]
+        # Create upper triangular mask to avoid duplicate checks
+        mask = np.triu(np.ones_like(corr_subset), k=1)
+        return np.all(np.abs(corr_subset.values[mask.astype(bool)]) <= epsilon)
 
     def _aggregate_importance(
         self, feature_set: Set[str], importances: Dict[str, float]
@@ -128,14 +95,13 @@ class EnhancedFeatureAnalyzer:
 
         for epsilon in self.epsilons:
             for delta in self.deltas:
-                delta = delta / self.shap_scale * 100
                 valid_pairs = []
 
                 for size in range(1, self.max_set_size + 1):
                     feature_sets = [
-                        set(combo)
-                        for combo in combinations(all_features, size)
-                        if self._check_correlation_threshold(set(combo), epsilon)
+                        combo_set
+                        for combo_set in self.feature_combinations[size]
+                        if self._check_correlation_threshold(combo_set, epsilon)
                     ]
 
                     for set1, set2 in combinations(feature_sets, 2):
@@ -182,5 +148,86 @@ class EnhancedFeatureAnalyzer:
                         }
                         for pair in valid_pairs
                     ]
+
+        return results
+
+    def _get_conditional_data(self, rule) -> pd.DataFrame:
+        mask = pd.Series(True, index=self.X.index)
+        for condition in rule.conds:
+            feature_idx = condition.feature
+            feature_name = self.feature_names[feature_idx]
+            cond_str = str(condition)
+
+            if "-" in cond_str:
+                try:
+                    value_str = cond_str.split("=")[1]
+                    lower, upper = map(float, value_str.split("-"))
+                    mask &= (self.X[feature_name] >= lower) & (
+                        self.X[feature_name] <= upper
+                    )
+                    continue
+                except Exception as e:
+                    raise ValueError(
+                        f"Failed to parse range condition: {cond_str}"
+                    ) from e
+
+            for op_str, operator in [
+                ("=<", "<="),
+                ("=>", ">="),
+                ("=", "=="),
+                ("<", "<"),
+                (">", ">"),
+            ]:
+                if op_str in cond_str:
+                    try:
+                        value = float(cond_str.split(op_str)[1])
+                        mask &= eval(f"self.X[feature_name] {operator} value")
+                        break
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed to parse condition: {cond_str}"
+                        ) from e
+            else:
+                raise ValueError(f"Unrecognized condition format: {cond_str}")
+
+        return self.X[mask]
+
+    def analyze_ruleset(self, ruleset, output_dir=None) -> Dict:
+        results = {
+            "rule_analyses": {},
+            "metadata": {
+                "epsilons": self.epsilons,
+                "deltas": self.deltas,
+                "shap_scale": float(self.shap_scale),
+                "max_set_size": self.max_set_size,
+                "total_features": len(self.feature_names),
+            },
+        }
+
+        with ThreadPoolExecutor() as executor:
+            rule_futures = {
+                executor.submit(self.analyze_rule, rule): i
+                for i, rule in enumerate(ruleset)
+            }
+
+            for future in rule_futures:
+                rule_results = future.result()
+                rule_idx = rule_futures[future]
+
+                if rule_results:
+                    results["rule_analyses"][f"rule_{rule_idx}"] = {
+                        "rule_string": str(ruleset[rule_idx]),
+                        "analysis": rule_results,
+                    }
+
+                if self.progress_logger:
+                    try:
+                        self.progress_logger.update_progress("analysis", 1)
+                    except Exception:
+                        pass
+
+        if output_dir:
+            output_path = save_json_results(results, output_dir, "feature_analysis")
+            results["output_path"] = output_path
 
         return results
