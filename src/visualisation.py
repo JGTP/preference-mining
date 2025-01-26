@@ -31,25 +31,43 @@ def process_results(results: Dict[str, Any]) -> pd.DataFrame:
 
 
 def create_combined_plot(df: pd.DataFrame, output_path: Path, x_var: str) -> None:
-    plt.figure(figsize=(10, 6))
-    metrics = ["total_preference_relations", "mean_dimensions_Dw", "mean_dimensions_Db"]
-    labels = [
-        "Total Preference Relations",
-        "Mean Dimensions in $D_w$",
-        "Mean Dimensions in $D_b$",
-    ]
-    colours = ["blue", "red", "green"]
-    markers = ["o", "s", "^"]
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx()
+
     grouped = df.groupby(x_var)
-    plt.figure(figsize=(10, 6))
-    for metric, label, colour, marker in zip(metrics, labels, colours, markers):
-        mean_values = grouped[metric].mean()
-        sem_values = grouped[metric].sem()
-        plt.errorbar(
-            mean_values.index,
-            mean_values.values,
-            yerr=sem_values.values,
-            color=colour,
+
+    mean_relations = grouped["total_preference_relations"].mean()
+    sem_relations = grouped["total_preference_relations"].sem()
+    ln1 = ax1.errorbar(
+        mean_relations.index,
+        mean_relations.values,
+        yerr=sem_relations.values,
+        color="blue",
+        label="N (Total Preference Relations)",
+        marker="o",
+        capsize=5,
+        linestyle="-",
+        markersize=8,
+        elinewidth=1.5,
+        capthick=1.5,
+    )
+
+    colors = ["red", "green"]
+    markers = ["s", "^"]
+    lines = [ln1]
+    for metric, label, color, marker in zip(
+        ["mean_dimensions_Dw", "mean_dimensions_Db"],
+        ["W (Mean Dimensions in $D_w$)", "B (Mean Dimensions in $D_b$)"],
+        colors,
+        markers,
+    ):
+        mean_vals = grouped[metric].mean()
+        sem_vals = grouped[metric].sem()
+        ln = ax2.errorbar(
+            mean_vals.index,
+            mean_vals.values,
+            yerr=sem_vals.values,
+            color=color,
             label=label,
             marker=marker,
             capsize=5,
@@ -58,13 +76,20 @@ def create_combined_plot(df: pd.DataFrame, output_path: Path, x_var: str) -> Non
             elinewidth=1.5,
             capthick=1.5,
         )
-    plt.xlabel(f"${x_var}$")
-    plt.ylabel("Metric Value")
-    plt.title(f"Preference Relation Metrics vs {x_var.capitalize()}")
-    plt.legend()
+        lines.append(ln)
+
+    x_label = "\u03B5" if x_var == "epsilon" else "\u03B4"
+    ax1.set_xlabel(f"${x_label}$")
+    ax1.set_ylabel("Number of Preference Relations")
+    ax2.set_ylabel("Mean Number of Dimensions")
+
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc="upper left", bbox_to_anchor=(0.05, 1.15))
+
+    plt.title(f"Preference Relation Metrics vs {x_label}")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 
 
