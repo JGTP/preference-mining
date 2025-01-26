@@ -2,6 +2,7 @@
 # .vscode
 data/cache
 results
+pytest/test_plots
 
 # ========================================github=====================================
 # Byte-compiled / optimized / DLL files

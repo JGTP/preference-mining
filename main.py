@@ -47,18 +47,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    epsilons = list(
-        np.arange(
-            args.epsilon_start, args.epsilon_end + args.epsilon_step, args.epsilon_step
+    epsilons = [
+        x * args.epsilon_step + args.epsilon_start
+        for x in range(
+            int((args.epsilon_end - args.epsilon_start) / args.epsilon_step) + 1
         )
-    )
-    deltas = list(
-        np.arange(
-            args.delta_start,
-            args.delta_end + args.delta_step,
-            args.delta_step,
-        )
-    )
+    ]
+    deltas = [
+        x * args.delta_step + args.delta_start
+        for x in range(int((args.delta_end - args.delta_start) / args.delta_step) + 1)
+    ]
 
     analysis_config = {
         "epsilons": epsilons,

@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
-from src.black_box import ModelTrainer
+from src.black_box import ModelTrainer, ModelExplainer
 
 
 @pytest.fixture
@@ -53,7 +53,10 @@ def test_basic_training(synthetic_data):
         assert std_score >= 0
 
     trainer.train(X_train, y_train)
-    importance_dict = trainer.get_shap_feature_importances(X_train)
+
+    # Test ModelExplainer separately
+    explainer = ModelExplainer(trainer.model, trainer.feature_names)
+    importance_dict = explainer.explain(X_train)
     assert "feature_importances" in importance_dict
     assert len(importance_dict["feature_importances"]) == X_train.shape[1]
 
@@ -67,10 +70,8 @@ def test_empty_data(edge_case_data):
     X_empty, y_empty = edge_case_data["empty"]
     trainer = ModelTrainer()
 
-    cv_metrics = trainer.evaluate_cv(X_empty, y_empty)
-    for metric, (mean_score, std_score) in cv_metrics.items():
-        assert mean_score == 0.0
-        assert std_score == 0.0
+    with pytest.raises(ValueError):
+        trainer.evaluate_cv(X_empty, y_empty)
 
     with pytest.raises(ValueError):
         trainer.train(X_empty, y_empty)
@@ -118,11 +119,13 @@ def test_missing_value_predictions(edge_case_data):
     assert probabilities.shape == (len(y_missing), 2)
 
 
-def test_importance_calculation(synthetic_data):
+def test_feature_importance_calculation(synthetic_data):
     X_train, _, y_train, _ = synthetic_data
     trainer = ModelTrainer()
     trainer.train(X_train, y_train)
-    importance_dict = trainer.get_shap_feature_importances(X_train)
+
+    explainer = ModelExplainer(trainer.model, trainer.feature_names)
+    importance_dict = explainer.explain(X_train)
 
     assert "feature_importances" in importance_dict
     assert "metadata" in importance_dict

@@ -6,7 +6,6 @@ from src.preprocessing import DataPreprocessor
 
 @pytest.fixture
 def sample_data():
-    """Create sample dataset with various data types and scenarios"""
     return pd.DataFrame(
         {
             "temperature": [25.5, -99, 27.8, 26.2, -99],
@@ -36,8 +35,7 @@ def sample_data():
     )
 
 
-def test_initialization():
-    """Test preprocessor initialization"""
+def test_initialisation():
     preprocessor = DataPreprocessor(
         date_columns=["order_date", "shipping_date"],
         coordinate_columns=["latitude", "longitude"],
@@ -52,7 +50,6 @@ def test_initialization():
 
 
 def test_missing_value_handling(sample_data):
-    """Test handling of various missing value formats"""
     preprocessor = DataPreprocessor(
         missing_value_codes={"-99": ["temperature"], "-9": ["humidity"]}
     )
@@ -60,15 +57,11 @@ def test_missing_value_handling(sample_data):
     processed_data = preprocessor._handle_missing_values(sample_data)
 
     assert pd.isna(processed_data.loc[1, "temperature"])
-
     assert pd.isna(processed_data.loc[2, "humidity"])
-
     assert pd.isna(processed_data.loc[1, "notes"])
 
 
 def test_categorical_encoding():
-    """Test categorical encoding with a simple dataset"""
-    # Create a simple test dataset
     test_data = pd.DataFrame(
         {
             "product_category": ["A", "B", "A", "C", "B"],
@@ -85,10 +78,6 @@ def test_categorical_encoding():
 
     processed_data = preprocessor._encode_categoricals(test_data)
 
-    # Print the columns for debugging
-    print("\nProcessed columns:", processed_data.columns.tolist())
-
-    # Check specific encoded columns exist
     assert "product_category_A" in processed_data.columns
     assert "region_North" in processed_data.columns
     assert "status_code_1" in processed_data.columns

@@ -1,0 +1,10 @@
+pytest
+pandas
+scikit-learn
+shap
+tqdm
+wittgenstein
+joblib
+matplotlib
+pyyaml
+openpyxl

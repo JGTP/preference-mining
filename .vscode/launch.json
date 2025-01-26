@@ -11,11 +11,11 @@
             "args": [
                 "data/globalterrorismdb_0522dist.xlsx",
                 "--test_size",
-                "10000",
+                "1000",
                 "--min_year",
                 "1997",
                 "--n_splits",
-                "5",
+                "3",
                 "--max_set_size",
                 "3",
                 "--epsilon_start",
@@ -25,11 +25,11 @@
                 "--epsilon_step",
                 "0.10",
                 "--delta_start",
-                "0.40",
+                "0.01",
                 "--delta_end",
-                "0.50",
+                "0.02",
                 "--delta_step",
-                "0.10",
+                "0.01",
                 "--output_dir",
                 "results"
             ]
