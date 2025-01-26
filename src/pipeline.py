@@ -1,53 +1,33 @@
 import logging
-
 from pathlib import Path
-
 import yaml
-
 from src.progress_logger import setup_progress_logging
-
 from src.preprocessing import DataPreprocessor
-
 from src.black_box import train_and_evaluate_model
-
 from src.feature_set_analysis import EnhancedFeatureAnalyser
-
 from src.ripper import cross_validate_RIPPER
-
 from src.utils import save_json_results
-
 from src.visualisation import process_results, create_epsilon_plot, create_delta_plot
 
 
 def setup_logging():
-
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
 
 def load_preprocessing_config(config_path: str = "config/gtd.yaml") -> dict:
-
     config_path = Path(config_path)
-
     if not config_path.exists():
-
         logging.warning(
             f"Config file {config_path} not found. Using default configuration."
         )
-
         return {}
-
     try:
-
         with open(config_path, "r") as f:
-
             return yaml.safe_load(f)
-
     except yaml.YAMLError as e:
-
         logging.error(f"Error parsing config file: {e}")
-
         raise
 
 
@@ -61,33 +41,21 @@ def execute_pipeline(
     output_dir: str = "results",
     analysis_config: dict = None,
 ) -> dict:
-
     if analysis_config is None:
-
         analysis_config = {
             "epsilons": [i / 20 for i in range(1, 11)],
             "deltas": [i / 20 for i in range(1, 11)],
             "max_set_size": 10,
         }
-
     config = load_preprocessing_config(config_path)
-
     target_column = config.get("target").get("column")
-
     output_dir = Path(output_dir)
-
     output_dir.mkdir(parents=True, exist_ok=True)
-
     feature_analysis_dir = output_dir / "feature_analysis"
-
     feature_analysis_dir.mkdir(parents=True, exist_ok=True)
-
     progress_logger = setup_progress_logging()
-
     try:
-
         logging.info(f"Loading data from {data_path}")
-
         preprocessor = DataPreprocessor(
             date_columns=config.get("date_columns", []),
             coordinate_columns=config.get("coordinate_columns", []),
@@ -100,37 +68,25 @@ def execute_pipeline(
             year_column="iyear",
             test_size=test_size,
         )
-
         preprocess_id = progress_logger.create_progress_bar(
             "preprocess", 100, "Preprocessing data"
         )
-
         X, y = preprocessor.preprocess_data(data_path, target_column=target_column)
-
         progress_logger.update_progress(preprocess_id, 100)
-
         progress_logger.close_progress_bar(preprocess_id)
-
         ripper_id = progress_logger.create_progress_bar(
             "ripper", n_splits, "Cross-validating RIPPER"
         )
-
         stable_rules = cross_validate_RIPPER(
             X, y, n_splits=n_splits, progress_logger=progress_logger
         )
-
         progress_logger.close_progress_bar(ripper_id)
-
         bb_id = progress_logger.create_progress_bar(
             "blackbox", 100, "Training black box model"
         )
-
         bb_results, model = train_and_evaluate_model(X, y)
-
         progress_logger.update_progress(bb_id, 100)
-
         progress_logger.close_progress_bar(bb_id)
-
         analyser = EnhancedFeatureAnalyser(
             model=model.model,
             X=X,
@@ -139,11 +95,9 @@ def execute_pipeline(
             max_set_size=analysis_config.get("max_set_size", 10),
             progress_logger=progress_logger,
         )
-
         feature_analysis = analyser.analyse_ruleset(
             ruleset=stable_rules, output_dir=feature_analysis_dir
         )
-
         pipeline_results = {
             "metadata": {
                 "pipeline_version": "2.0",
@@ -152,27 +106,16 @@ def execute_pipeline(
             "black_box_results": bb_results,
             "feature_analysis_results": feature_analysis,
         }
-
         df = process_results(feature_analysis)
-
         create_epsilon_plot(df, output_dir / "epsilon_plot.pdf")
-
         create_delta_plot(df, output_dir / "delta_plot.pdf")
-
         output_path = save_json_results(
             pipeline_results, output_dir, "pipeline_results"
         )
-
         pipeline_results["output_path"] = output_path
-
         progress_logger.shutdown()
-
         return pipeline_results
-
     except Exception as e:
-
         progress_logger.shutdown()
-
         logging.error(f"Error during pipeline execution: {e}")
-
         raise

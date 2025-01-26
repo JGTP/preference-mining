@@ -46,7 +46,6 @@ if __name__ == "__main__":
         help="Delta percentage step size",
     )
     args = parser.parse_args()
-
     epsilons = [
         x * args.epsilon_step + args.epsilon_start
         for x in range(
@@ -57,13 +56,11 @@ if __name__ == "__main__":
         x * args.delta_step + args.delta_start
         for x in range(int((args.delta_end - args.delta_start) / args.delta_step) + 1)
     ]
-
     analysis_config = {
         "epsilons": epsilons,
         "deltas": deltas,
         "max_set_size": args.max_set_size,
     }
-
     execute_pipeline(
         data_path=args.data_path,
         test_size=args.test_size,

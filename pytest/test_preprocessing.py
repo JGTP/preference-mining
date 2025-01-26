@@ -44,7 +44,6 @@ def test_initialisation():
         columns_to_exclude=["notes"],
         missing_value_codes={"temperature": [-99], "humidity": [-9]},
     )
-
     assert preprocessor.date_columns == ["order_date", "shipping_date"]
     assert preprocessor.missing_value_codes["temperature"] == [-99]
 
@@ -53,9 +52,7 @@ def test_missing_value_handling(sample_data):
     preprocessor = DataPreprocessor(
         missing_value_codes={"-99": ["temperature"], "-9": ["humidity"]}
     )
-
     processed_data = preprocessor._handle_missing_values(sample_data)
-
     assert pd.isna(processed_data.loc[1, "temperature"])
     assert pd.isna(processed_data.loc[2, "humidity"])
     assert pd.isna(processed_data.loc[1, "notes"])
@@ -69,19 +66,15 @@ def test_categorical_encoding():
             "status_code": [1, 2, 1, 3, 2],
         }
     )
-
     preprocessor = DataPreprocessor(
         categorical_columns=["product_category", "region"],
         numeric_categorical_columns=["status_code"],
         one_hot_encoding=True,
     )
-
     processed_data = preprocessor._encode_categoricals(test_data)
-
     assert "product_category_A" in processed_data.columns
     assert "region_North" in processed_data.columns
     assert "status_code_1" in processed_data.columns
-
     assert processed_data["product_category_A"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]
     assert processed_data["region_North"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]
     assert processed_data["status_code_1"].tolist() == [1.0, 0.0, 1.0, 0.0, 0.0]

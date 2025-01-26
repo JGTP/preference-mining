@@ -51,7 +51,6 @@ def test_shap_cache(analyser, sample_data):
     result1 = analyser._calculate_shap_values(sample_data)
     cache_size1 = len(analyser._shap_cache)
     assert cache_size1 > 0
-
     result2 = analyser._calculate_shap_values(sample_data)
     cache_size2 = len(analyser._shap_cache)
     assert cache_size2 == cache_size1
@@ -78,7 +77,6 @@ def test_parallel_rule_analysis(analyser):
 
     ruleset = [MockRule() for _ in range(5)]
     result = analyser.analyse_ruleset(ruleset)
-
     assert isinstance(result, dict)
     assert "rule_analyses" in result
     assert len(result["rule_analyses"]) <= len(ruleset)
@@ -94,7 +92,6 @@ def test_correlation_threshold(analyser):
         }
     )
     analyser.correlation_matrix = test_data.corr()
-
     assert not analyser._check_correlation_threshold({"a", "b"}, epsilon=0.5)
     assert analyser._check_correlation_threshold({"a", "c"}, epsilon=0.9)
     assert not analyser._check_correlation_threshold({"a", "d"}, epsilon=0.5)
@@ -144,7 +141,6 @@ def test_analyse_ruleset(analyser):
 
     ruleset = [MockRule(), MockRule()]
     result = analyser.analyse_ruleset(ruleset)
-
     assert isinstance(result, dict)
     assert "rule_analyses" in result
     assert "metadata" in result
