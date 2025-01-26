@@ -57,11 +57,6 @@ class EnhancedFeatureAnalyser:
                 else:
                     self.set_correlations[frozenset(feature_set)] = 0.0
 
-        explainer = shap.TreeExplainer(self.model)
-        shap_values = explainer(self.X)
-        self.shap_scale = np.abs(shap_values.values).mean()
-        self.deltas = [p * self.shap_scale for p in self.deltas]
-
     def _calculate_shap_values(self, data: pd.DataFrame) -> Dict[str, float]:
         cache_key = (data.shape[0], hash(str(data.values.tobytes())))
         if cache_key in self._shap_cache:
@@ -148,7 +143,7 @@ class EnhancedFeatureAnalyser:
                             imp1 = self._aggregate_importance(set1, shap_values)
                             imp2 = self._aggregate_importance(set2, shap_values)
 
-                            if imp1 - imp2 > delta:
+                            if imp2 > 0 and (imp1 - imp2) / imp2 > delta:
                                 if self._check_correlation_threshold(set1, epsilon):
                                     valid_pairs.append(
                                         FeatureSetResult(
@@ -187,7 +182,6 @@ class EnhancedFeatureAnalyser:
             "metadata": {
                 "epsilons": self.epsilons,
                 "deltas": self.deltas,
-                "shap_scale": float(self.shap_scale),
                 "max_set_size": self.max_set_size,
                 "total_features": len(self.feature_names),
             },

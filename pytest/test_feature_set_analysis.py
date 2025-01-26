@@ -44,7 +44,6 @@ def test_initialisation(analyser):
     assert analyser.max_set_size == 3
     assert len(analyser.feature_names) == 4
     assert isinstance(analyser.correlation_matrix, pd.DataFrame)
-    assert hasattr(analyser, "shap_scale")
 
 
 def test_shap_cache(analyser, sample_data):
