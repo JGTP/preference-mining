@@ -1,8 +1,14 @@
 import pytest
 import os
 import pandas as pd
+import json
 from pathlib import Path
 from src.visualisation import process_results, create_epsilon_plot, create_delta_plot
+
+
+@pytest.fixture
+def mock_temp_dir(tmpdir):
+    return Path(tmpdir)
 
 
 @pytest.fixture
@@ -31,24 +37,23 @@ def sample_results():
     return {"rule_analyses": rule_analyses}
 
 
-def test_create_plots(sample_results, tmpdir):
-    plots_dir = Path("pytest/test_plots")
-    plots_dir.mkdir(exist_ok=True)
-    df = process_results(sample_results)
-    epsilon_plot_path = plots_dir / "epsilon_plot.pdf"
-    create_epsilon_plot(df, epsilon_plot_path)
-    print(f"\nEpsilon plot saved to: {epsilon_plot_path.absolute()}")
-    assert epsilon_plot_path.exists()
-    assert epsilon_plot_path.stat().st_size > 0
-    delta_plot_path = plots_dir / "delta_plot.pdf"
-    create_delta_plot(df, delta_plot_path)
-    print(f"\nDelta plot saved to: {delta_plot_path.absolute()}")
-    assert delta_plot_path.exists()
-    assert delta_plot_path.stat().st_size > 0
+@pytest.fixture
+def setup_temp_files(mock_temp_dir):
+    mock_temp_dir.mkdir(parents=True, exist_ok=True)
+    shap_values = {f"feature{i}": 0.1 * i for i in range(10)}
+    correlations = {
+        f"[feature{i},feature{j}]": 0.1 for i in range(10) for j in range(i + 1, 10)
+    }
+
+    with open(mock_temp_dir / "shap_values.json", "w") as f:
+        json.dump(shap_values, f)
+    with open(mock_temp_dir / "correlations.json", "w") as f:
+        json.dump(correlations, f)
+    return mock_temp_dir
 
 
-def test_process_results(sample_results):
-    df = process_results(sample_results)
+def test_process_results(sample_results, setup_temp_files):
+    df = process_results(sample_results, setup_temp_files)
     assert isinstance(df, pd.DataFrame)
     assert all(
         col in df.columns
@@ -61,10 +66,44 @@ def test_process_results(sample_results):
         ]
     )
     assert len(df) > 0
-
-
-def test_process_results_metrics_vary(sample_results):
-    df = process_results(sample_results)
     assert df["total_preference_relations"].nunique() > 1
     assert df["mean_dimensions_Dw"].nunique() > 1
     assert df["mean_dimensions_Db"].nunique() > 1
+
+
+def test_create_plots(sample_results, setup_temp_files):
+    plots_dir = Path("pytest/test_plots")
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir.mkdir(exist_ok=True)
+
+    df = process_results(sample_results, setup_temp_files)
+
+    # Test epsilon plot
+    epsilon_plot_path = plots_dir / "epsilon_plot.pdf"
+    create_epsilon_plot(df, epsilon_plot_path)
+    assert epsilon_plot_path.exists()
+    assert epsilon_plot_path.stat().st_size > 0
+
+    # Test delta plot
+    delta_plot_path = plots_dir / "delta_plot.pdf"
+    create_delta_plot(df, delta_plot_path)
+    assert delta_plot_path.exists()
+    assert delta_plot_path.stat().st_size > 0
+
+
+def test_process_results_with_missing_files(sample_results, mock_temp_dir):
+    with pytest.raises(FileNotFoundError):
+        process_results(sample_results, mock_temp_dir)
+
+
+def test_process_results_with_invalid_json(mock_temp_dir):
+    mock_temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create invalid JSON files
+    with open(mock_temp_dir / "shap_values.json", "w") as f:
+        f.write("invalid json")
+    with open(mock_temp_dir / "correlations.json", "w") as f:
+        f.write("invalid json")
+
+    with pytest.raises(json.JSONDecodeError):
+        process_results({"rule_analyses": {}}, mock_temp_dir)

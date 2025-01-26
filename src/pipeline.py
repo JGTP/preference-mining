@@ -113,6 +113,7 @@ def execute_pipeline(
             pipeline_results, output_dir, "pipeline_results"
         )
         pipeline_results["output_path"] = output_path
+        analyser.cleanup()  # Cleanup temp files after visualization
         progress_logger.shutdown()
         return pipeline_results
     except Exception as e:

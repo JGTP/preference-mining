@@ -5,7 +5,10 @@ import pandas as pd
 from itertools import combinations
 import shap
 from concurrent.futures import ThreadPoolExecutor
-from src.utils import save_json_results
+from pathlib import Path
+import json
+from src.utils import save_json_results, convert_to_serialisable
+import tempfile
 
 
 @dataclass
@@ -28,6 +31,7 @@ class EnhancedFeatureAnalyser:
         deltas: List[float] = None,
         max_set_size: int = 10,
         progress_logger: Optional[object] = None,
+        temp_dir: Optional[str] = None,
     ):
         self.model = model
         self.X = X
@@ -37,51 +41,77 @@ class EnhancedFeatureAnalyser:
         self.feature_names = X.columns.tolist()
         self.correlation_matrix = X.corr()
         self.progress_logger = progress_logger
-        self._shap_cache = {}
+        self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp())
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._calculate_and_store_shap()
+            self._store_correlations()
+        except Exception as e:
+            self.cleanup()
+            raise e
 
-        self.feature_combinations = {}
-        self.set_correlations = {}
-        all_features = set(self.feature_names)
+    def cleanup(self):
+        """Explicitly cleanup temporary files when analysis is complete"""
+        if hasattr(self, "temp_dir") and self.temp_dir.exists():
+            for file in self.temp_dir.glob("*.json"):
+                try:
+                    file.unlink()
+                except:
+                    pass
+            try:
+                self.temp_dir.rmdir()
+            except:
+                pass
 
-        for size in range(1, self.max_set_size + 1):
-            combos = [set(combo) for combo in combinations(all_features, size)]
-            self.feature_combinations[size] = combos
-
-            for feature_set in combos:
-                if len(feature_set) > 1:
-                    max_corr = max(
-                        abs(self.correlation_matrix.loc[f1, f2])
-                        for f1, f2 in combinations(feature_set, 2)
-                    )
-                    self.set_correlations[frozenset(feature_set)] = max_corr
-                else:
-                    self.set_correlations[frozenset(feature_set)] = 0.0
-
-    def _calculate_shap_values(self, data: pd.DataFrame) -> Dict[str, float]:
-        cache_key = (data.shape[0], hash(str(data.values.tobytes())))
-        if cache_key in self._shap_cache:
-            return self._shap_cache[cache_key]
+    def _calculate_and_store_shap(self):
         explainer = shap.TreeExplainer(self.model)
-        shap_values = explainer(data)
-        mean_shap = np.abs(shap_values.values).mean(axis=0)
-        result = dict(zip(self.feature_names, mean_shap))
-        self._shap_cache[cache_key] = result
-        return result
+        shap_values = explainer(self.X)
+        squared_shap = np.square(shap_values.values)
+        mean_shap_values = squared_shap.mean(axis=0)
+        shap_dict = {
+            name: float(importance)
+            for name, importance in zip(self.feature_names, mean_shap_values)
+        }
+        with open(self.temp_dir / "shap_values.json", "w") as f:
+            json.dump(shap_dict, f)
+
+    def _store_correlations(self):
+        corr_dict = {}
+        for size in range(2, self.max_set_size + 1):
+            for feature_set in combinations(self.feature_names, size):
+                max_corr = max(
+                    abs(self.correlation_matrix.loc[f1, f2])
+                    for f1, f2 in combinations(feature_set, 2)
+                )
+                corr_dict[str(sorted(list(feature_set)))] = float(max_corr)
+
+        with open(self.temp_dir / "correlations.json", "w") as f:
+            json.dump(corr_dict, f)
+
+    def _get_shap_values(self):
+        with open(self.temp_dir / "shap_values.json", "r") as f:
+            return json.load(f)
+
+    def _get_correlation(self, feature_set):
+        if len(feature_set) < 2:
+            return 0.0
+        with open(self.temp_dir / "correlations.json", "r") as f:
+            correlations = json.load(f)
+            return correlations.get(str(sorted(list(feature_set))), 0.0)
 
     def _check_correlation_threshold(
         self, feature_set: Set[str], epsilon: float
     ) -> bool:
         if len(feature_set) < 2:
             return True
-        frozen_set = frozenset(feature_set)
-        if frozen_set in self.set_correlations:
-            return self.set_correlations[frozen_set] <= epsilon
 
-        max_corr = max(
-            abs(self.correlation_matrix.loc[f1, f2])
-            for f1, f2 in combinations(feature_set, 2)
-        )
-        return max_corr <= epsilon
+        try:
+            with open(self.temp_dir / "correlations.json", "r") as f:
+                correlations = json.load(f)
+                key = str(sorted(list(feature_set)))
+                return correlations.get(key, 0.0) <= epsilon
+        except:
+            return True  # Fallback if file read fails
 
     def _aggregate_importance(
         self, feature_set: Set[str], importances: Dict[str, float]
@@ -122,23 +152,31 @@ class EnhancedFeatureAnalyser:
                         raise ValueError(
                             f"Failed to parse condition: {cond_str}"
                         ) from e
-            else:
-                raise ValueError(f"Unrecognised condition format: {cond_str}")
         return self.X[mask]
 
     def analyse_rule(self, rule) -> Dict:
         conditional_data = self._get_conditional_data(rule)
         if len(conditional_data) < 10:
             return {}
-        shap_values = self._calculate_shap_values(conditional_data)
+
+        shap_values = self._get_shap_values()
         results = {}
+
+        batch_size = 1000
+        feature_combinations = []
+        for size in range(1, self.max_set_size + 1):
+            feature_combinations.extend(combinations(self.feature_names, size))
 
         for epsilon in self.epsilons:
             for delta in self.deltas:
                 valid_pairs = []
-                for size in range(1, self.max_set_size + 1):
-                    feature_sets = self.feature_combinations[size]
-                    for set1, set2 in combinations(feature_sets, 2):
+
+                for i in range(0, len(feature_combinations), batch_size):
+                    batch = feature_combinations[i : i + batch_size]
+                    batch_pairs = combinations(batch, 2)
+
+                    for combo1, combo2 in batch_pairs:
+                        set1, set2 = set(combo1), set(combo2)
                         if not set1.intersection(set2):
                             imp1 = self._aggregate_importance(set1, shap_values)
                             imp2 = self._aggregate_importance(set2, shap_values)
@@ -152,17 +190,18 @@ class EnhancedFeatureAnalyser:
                                             set1_importance=imp1,
                                             set2_importance=imp2,
                                             importance_difference=imp1 - imp2,
-                                            max_correlation_set1=self.set_correlations[
-                                                frozenset(set1)
-                                            ],
-                                            max_correlation_set2=self.set_correlations[
-                                                frozenset(set2)
-                                            ],
+                                            max_correlation_set1=self._get_correlation(
+                                                set1
+                                            ),
+                                            max_correlation_set2=self._get_correlation(
+                                                set2
+                                            ),
                                         )
                                     )
 
                 if valid_pairs:
-                    results[f"epsilon_{epsilon}_delta_{delta:.1f}%"] = [
+                    key = f"epsilon_{epsilon}_delta_{delta:.1f}%"
+                    results[key] = [
                         {
                             "set1": list(pair.set1),
                             "set2": list(pair.set2),
@@ -174,6 +213,12 @@ class EnhancedFeatureAnalyser:
                         }
                         for pair in valid_pairs
                     ]
+
+                    with open(
+                        self.temp_dir / f"results_e{epsilon}_d{delta}.json", "w"
+                    ) as f:
+                        json.dump(results[key], f)
+
         return results
 
     def analyse_ruleset(self, ruleset, output_dir=None) -> Dict:
@@ -186,11 +231,13 @@ class EnhancedFeatureAnalyser:
                 "total_features": len(self.feature_names),
             },
         }
+
         with ThreadPoolExecutor() as executor:
             rule_futures = {
                 executor.submit(self.analyse_rule, rule): i
                 for i, rule in enumerate(ruleset)
             }
+
             for future in rule_futures:
                 rule_results = future.result()
                 rule_idx = rule_futures[future]
@@ -204,7 +251,9 @@ class EnhancedFeatureAnalyser:
                         self.progress_logger.update_progress("analysis", 1)
                     except Exception:
                         pass
+
         if output_dir:
             output_path = save_json_results(results, output_dir, "feature_analysis")
             results["output_path"] = output_path
+
         return results

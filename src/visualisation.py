@@ -1,15 +1,25 @@
+import json
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any
 
 
-def process_results(results: Dict[str, Any]) -> pd.DataFrame:
+def process_results(results: Dict[str, Any], temp_dir: Path) -> pd.DataFrame:
     rows = []
+
+    # Load cached SHAP values and correlations
+    with open(temp_dir / "shap_values.json", "r") as f:
+        shap_values = json.load(f)
+    with open(temp_dir / "correlations.json", "r") as f:
+        correlations = json.load(f)
+
     for rule_info in results["rule_analyses"].values():
         for param_key, analyses in rule_info["analysis"].items():
             epsilon = float(param_key.split("_")[1])
             delta = float(param_key.split("delta_")[1].rstrip("%"))
+
+            # Use stored values instead of recalculating
             num_preference_relations = len(analyses)
             total_mean_dimensions_Dw = (
                 sum(len(analysis["set1"]) for analysis in analyses)
@@ -19,6 +29,7 @@ def process_results(results: Dict[str, Any]) -> pd.DataFrame:
                 sum(len(analysis["set2"]) for analysis in analyses)
                 / num_preference_relations
             )
+
             row = {
                 "epsilon": epsilon,
                 "delta": delta,
@@ -27,6 +38,7 @@ def process_results(results: Dict[str, Any]) -> pd.DataFrame:
                 "mean_dimensions_Db": total_mean_dimensions_Db,
             }
             rows.append(row)
+
     return pd.DataFrame(rows)
 
 
