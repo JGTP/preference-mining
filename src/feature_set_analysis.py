@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 from src.utils import save_json_results, convert_to_serialisable
 import tempfile
-
+import logging
 
 @dataclass
 class FeatureSetResult:
@@ -20,7 +20,6 @@ class FeatureSetResult:
     importance_difference: float
     max_correlation_set1: float
     max_correlation_set2: float
-
 
 class EnhancedFeatureAnalyser:
     def __init__(
@@ -45,9 +44,27 @@ class EnhancedFeatureAnalyser:
         self.progress_logger = progress_logger
         self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp())
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Log initialisation
+        logging.info(f"Initialising feature analysis with {len(self.feature_names)} features")
+        logging.info(f"Using {len(self.epsilons)} epsilon values and {len(self.deltas)} delta values")
+        
+        if self.progress_logger:
+            self.progress_logger.create_progress_bar(
+                "init_calculations", 
+                2,  # Two main initialisation steps
+                "Initialising feature calculations"
+            )
+        
         try:
             self._calculate_and_store_shap()
+            if self.progress_logger:
+                self.progress_logger.update_progress("init_calculations", 1)
+            
             self._store_correlations()
+            if self.progress_logger:
+                self.progress_logger.update_progress("init_calculations", 1)
+                
         except Exception as e:
             self.cleanup()
             raise e
@@ -55,17 +72,19 @@ class EnhancedFeatureAnalyser:
     def cleanup(self):
         """Explicitly cleanup temporary files when analysis is complete"""
         if hasattr(self, "temp_dir") and self.temp_dir.exists():
+            logging.info("Cleaning up temporary files")
             for file in self.temp_dir.glob("*.json"):
                 try:
                     file.unlink()
-                except:
-                    pass
+                except Exception as e:
+                    logging.warning(f"Failed to delete {file}: {e}")
             try:
                 self.temp_dir.rmdir()
-            except:
-                pass
+            except Exception as e:
+                logging.warning(f"Failed to remove temp directory: {e}")
 
     def _calculate_and_store_shap(self):
+        logging.info("Calculating SHAP values")
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer(self.X)
         squared_shap = np.square(shap_values.values)
@@ -76,25 +95,38 @@ class EnhancedFeatureAnalyser:
         }
         with open(self.temp_dir / "shap_values.json", "w") as f:
             json.dump(shap_dict, f)
+        logging.info("SHAP values calculated and stored")
 
     def _store_correlations(self):
+        logging.info("Calculating feature correlations")
+        if self.progress_logger:
+            total_combinations = sum(
+                len(list(combinations(self.feature_names, size)))
+                for size in range(2, self.max_set_size + 1)
+            )
+            self.progress_logger.create_progress_bar(
+                "correlation_calc",
+                total_combinations,
+                "Calculating correlations"
+            )
+
         corr_dict = {}
         for size in range(2, self.max_set_size + 1):
             for feature_set in combinations(self.feature_names, size):
-                # Get Pearson correlations between all pairs
                 correlations = [
                     abs(self.correlation_matrix.loc[f1, f2])
                     for f1, f2 in combinations(feature_set, 2)
                 ]
-                # If all correlations are NaN (e.g., for categorical features),
-                # treat as uncorrelated (0.0)
-                # If we have some valid correlations, use their maximum
                 valid_correlations = [c for c in correlations if not np.isnan(c)]
                 max_corr = max(valid_correlations) if valid_correlations else 0.0
                 corr_dict[str(sorted(list(feature_set)))] = float(max_corr)
+                
+                if self.progress_logger:
+                    self.progress_logger.update_progress("correlation_calc", 1)
 
         with open(self.temp_dir / "correlations.json", "w") as f:
             json.dump(corr_dict, f)
+        logging.info("Correlations calculated and stored")
 
     def _get_shap_values(self):
         with open(self.temp_dir / "shap_values.json", "r") as f:
@@ -118,8 +150,9 @@ class EnhancedFeatureAnalyser:
                 correlations = json.load(f)
                 key = str(sorted(list(feature_set)))
                 return correlations.get(key, 0.0) <= epsilon
-        except:
-            return True  # Fallback if file read fails
+        except Exception as e:
+            logging.warning(f"Error checking correlation threshold: {e}")
+            return True
 
     def _aggregate_importance(
         self, feature_set: Set[str], importances: Dict[str, float]
@@ -163,37 +196,61 @@ class EnhancedFeatureAnalyser:
         return self.X[mask]
 
     def analyse_rule(self, rule):
+        if self.progress_logger:
+            # Create progress bars for this rule's analysis stages
+            self.progress_logger.create_progress_bar(
+                f"rule_setup_{id(rule)}", 
+                3,  # Three main setup steps
+                f"Setting up analysis for rule {str(rule)[:30]}..."
+            )
+            
+        # Step 1: Get conditional data
         conditional_data = self._get_conditional_data(rule)
+        if self.progress_logger:
+            self.progress_logger.update_progress(f"rule_setup_{id(rule)}", 1)
+            
         if len(conditional_data) < 10:
+            logging.info(f"Skipping rule analysis - insufficient samples ({len(conditional_data)} < 10)")
             return {}
 
-        # Get SHAP values
-        with open(self.temp_dir / "shap_values.json", "r") as f:
-            shap_values = json.load(f)
+        # Step 2: Get SHAP values and prepare feature combinations
+        shap_values = self._get_shap_values()
+        if self.progress_logger:
+            self.progress_logger.update_progress(f"rule_setup_{id(rule)}", 1)
 
-        # Sort features by importance and take top N
-        top_features = sorted(shap_values.items(), key=lambda x: x[1], reverse=True)[
-            : self.top_features
-        ]
+        # Sort features and prepare combinations
+        top_features = sorted(
+            shap_values.items(), key=lambda x: x[1], reverse=True
+        )[:self.top_features]
         top_feature_names = [f[0] for f in top_features]
 
-        # Generate combinations only from top features for set1
         feature_combinations_set1 = []
+        feature_combinations_set2 = []
+        
         for size in range(1, self.max_set_size + 1):
             feature_combinations_set1.extend(combinations(top_feature_names, size))
-
-        # Generate all combinations for set2 (less important features)
-        feature_combinations_set2 = []
-        for size in range(1, self.max_set_size + 1):
             feature_combinations_set2.extend(combinations(self.feature_names, size))
+            
+        if self.progress_logger:
+            self.progress_logger.update_progress(f"rule_setup_{id(rule)}", 1)
+            
+            # Create progress bar for epsilon-delta combinations
+            total_ed_combinations = len(self.epsilons) * len(self.deltas)
+            self.progress_logger.create_progress_bar(
+                f"rule_combinations_{id(rule)}", 
+                total_ed_combinations,
+                f"Processing combinations for rule {str(rule)[:30]}..."
+            )
 
         results = {}
+        processed_combinations = 0
+        total_ed_combinations = len(self.epsilons) * len(self.deltas)
 
         for epsilon in self.epsilons:
             for delta in self.deltas:
                 valid_pairs = []
+                logging.info(f"Analysing with epsilon={epsilon}, delta={delta}")
 
-                # Compare top feature combinations with all other combinations
                 for combo1 in feature_combinations_set1:
                     set1 = set(combo1)
                     if not self._check_correlation_threshold(set1, epsilon):
@@ -213,12 +270,8 @@ class EnhancedFeatureAnalyser:
                                         set1_importance=imp1,
                                         set2_importance=imp2,
                                         importance_difference=imp1 - imp2,
-                                        max_correlation_set1=self._get_correlation(
-                                            set1
-                                        ),
-                                        max_correlation_set2=self._get_correlation(
-                                            set2
-                                        ),
+                                        max_correlation_set1=self._get_correlation(set1),
+                                        max_correlation_set2=self._get_correlation(set2),
                                     )
                                 )
 
@@ -241,10 +294,39 @@ class EnhancedFeatureAnalyser:
                         self.temp_dir / f"results_e{epsilon}_d{delta}.json", "w"
                     ) as f:
                         json.dump(results[key], f)
+                
+                if self.progress_logger:
+                    self.progress_logger.update_progress(f"rule_combinations_{id(rule)}", 1)
+                    
+                processed_combinations += 1
+                logging.info(f"Processed {processed_combinations}/{total_ed_combinations} combinations")
 
+        logging.info(f"Completed analysis for rule: {str(rule)[:50]}...")
         return results
 
     def analyse_ruleset(self, ruleset, output_dir=None) -> Dict:
+        # Initialize progress tracking
+        if self.progress_logger:
+            # Calculate total number of operations for setup
+            total_setup_steps = len(ruleset)  # One step per rule for initial setup
+            self.progress_logger.create_progress_bar(
+                "feature_analysis_setup", 
+                total_setup_steps, 
+                "Setting up feature analysis"
+            )
+            
+            # Calculate total combinations for detailed progress
+            total_combinations = 0
+            for epsilon in self.epsilons:
+                for delta in self.deltas:
+                    total_combinations += len(ruleset)
+            
+            self.progress_logger.create_progress_bar(
+                "feature_analysis_combinations", 
+                total_combinations,
+                "Analysing feature combinations"
+            )
+
         results = {
             "rule_analyses": {},
             "metadata": {
@@ -255,6 +337,7 @@ class EnhancedFeatureAnalyser:
             },
         }
 
+        logging.info(f"Starting analysis of {len(ruleset)} rules")
         with ThreadPoolExecutor() as executor:
             rule_futures = {
                 executor.submit(self.analyse_rule, rule): i
@@ -262,21 +345,21 @@ class EnhancedFeatureAnalyser:
             }
 
             for future in rule_futures:
-                rule_results = future.result()
-                rule_idx = rule_futures[future]
-                if rule_results:
-                    results["rule_analyses"][f"rule_{rule_idx}"] = {
-                        "rule_string": str(ruleset[rule_idx]),
-                        "analysis": rule_results,
-                    }
-                if self.progress_logger:
-                    try:
-                        self.progress_logger.update_progress("analysis", 1)
-                    except Exception:
-                        pass
+                try:
+                    rule_results = future.result()
+                    rule_idx = rule_futures[future]
+                    if rule_results:
+                        results["rule_analyses"][f"rule_{rule_idx}"] = {
+                            "rule_string": str(ruleset[rule_idx]),
+                            "analysis": rule_results,
+                        }
+                        logging.info(f"Completed analysis for rule {rule_idx}")
+                except Exception as e:
+                    logging.error(f"Error analysing rule: {e}")
 
         if output_dir:
             output_path = save_json_results(results, output_dir, "feature_analysis")
             results["output_path"] = output_path
+            logging.info(f"Results saved to {output_path}")
 
         return results

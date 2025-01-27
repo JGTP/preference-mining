@@ -1,4 +1,3 @@
-import numpy as np
 from src.pipeline import execute_pipeline
 import argparse
 
@@ -25,13 +24,11 @@ if __name__ == "__main__":
         help="Number of top features to consider for stronger feature sets",
     )
     parser.add_argument(
-        "--epsilon_start", type=float, default=0.05, help="Starting epsilon value"
-    )
-    parser.add_argument(
-        "--epsilon_end", type=float, default=0.50, help="Ending epsilon value"
-    )
-    parser.add_argument(
-        "--epsilon_step", type=float, default=0.05, help="Epsilon step size"
+        "--epsilons",
+        type=float,
+        nargs="+",
+        default=[0.1, 0.2],
+        help="List of epsilon values to use",
     )
     parser.add_argument(
         "--delta_start",
@@ -52,22 +49,20 @@ if __name__ == "__main__":
         help="Delta percentage step size",
     )
     args = parser.parse_args()
-    epsilons = [
-        x * args.epsilon_step + args.epsilon_start
-        for x in range(
-            int((args.epsilon_end - args.epsilon_start) / args.epsilon_step) + 1
-        )
-    ]
+
+    # Generate delta values using step sizes
     deltas = [
         x * args.delta_step + args.delta_start
         for x in range(int((args.delta_end - args.delta_start) / args.delta_step) + 1)
     ]
+
     analysis_config = {
-        "epsilons": epsilons,
+        "epsilons": args.epsilons,
         "deltas": deltas,
         "max_set_size": args.max_set_size,
         "top_features": args.top_features,
     }
+    
     execute_pipeline(
         data_path=args.data_path,
         test_size=args.test_size,

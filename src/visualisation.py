@@ -3,111 +3,133 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any
-
+from collections import defaultdict
 
 def process_results(results: Dict[str, Any], temp_dir: Path) -> pd.DataFrame:
-    rows = []
-
+    """
+    Process the analysis results into a DataFrame suitable for plotting.
+    
+    Args:
+        results: Dictionary containing the analysis results
+        temp_dir: Path to directory containing cached SHAP values and correlations
+        
+    Returns:
+        DataFrame with columns epsilon, delta, N, W, B containing processed metrics
+    """
     # Load cached SHAP values and correlations
     with open(temp_dir / "shap_values.json", "r") as f:
         shap_values = json.load(f)
     with open(temp_dir / "correlations.json", "r") as f:
         correlations = json.load(f)
 
+    # Create a nested defaultdict to accumulate metrics
+    metrics_by_params = defaultdict(lambda: defaultdict(list))
+    
+    # First pass: collect all metrics for each epsilon-delta combination
     for rule_info in results["rule_analyses"].values():
         for param_key, analyses in rule_info["analysis"].items():
             epsilon = float(param_key.split("_")[1])
             delta = float(param_key.split("delta_")[1].rstrip("%"))
+            
+            # Collect metrics for this epsilon-delta combination
+            metrics_by_params[(epsilon, delta)]['N'].append(len(analyses))
+            
+            if analyses:  # Only process if we have analyses
+                metrics_by_params[(epsilon, delta)]['W'].append(
+                    sum(len(analysis["set1"]) for analysis in analyses) / len(analyses)
+                )
+                metrics_by_params[(epsilon, delta)]['B'].append(
+                    sum(len(analysis["set2"]) for analysis in analyses) / len(analyses)
+                )
 
-            # Use stored values instead of recalculating
-            num_preference_relations = len(analyses)
-            total_mean_dimensions_Dw = (
-                sum(len(analysis["set1"]) for analysis in analyses)
-                / num_preference_relations
-            )
-            total_mean_dimensions_Db = (
-                sum(len(analysis["set2"]) for analysis in analyses)
-                / num_preference_relations
-            )
-
-            row = {
-                "epsilon": epsilon,
-                "delta": delta,
-                "total_preference_relations": num_preference_relations,
-                "mean_dimensions_Dw": total_mean_dimensions_Dw,
-                "mean_dimensions_Db": total_mean_dimensions_Db,
-            }
-            rows.append(row)
+    # Second pass: compute averages across rules
+    rows = []
+    for (epsilon, delta), metrics in metrics_by_params.items():
+        row = {
+            "epsilon": epsilon,
+            "delta": delta,
+            "N": sum(metrics['N']),  # Total number of preference relations
+            "W": sum(metrics['W']) / len(metrics['W']) if metrics['W'] else 0,  # Average dimensions
+            "B": sum(metrics['B']) / len(metrics['B']) if metrics['B'] else 0,  # Average dimensions
+        }
+        rows.append(row)
 
     return pd.DataFrame(rows)
 
-
-def create_combined_plot(df: pd.DataFrame, output_path: Path, x_var: str) -> None:
-    fig, ax1 = plt.subplots(figsize=(12, 7))
-    ax2 = ax1.twinx()
-
-    grouped = df.groupby(x_var)
-
-    mean_relations = grouped["total_preference_relations"].mean()
-    sem_relations = grouped["total_preference_relations"].sem()
-    ln1 = ax1.errorbar(
-        mean_relations.index,
-        mean_relations.values,
-        yerr=sem_relations.values,
-        color="blue",
-        label="N (Total Preference Relations)",
-        marker="o",
-        capsize=5,
-        linestyle="-",
-        markersize=8,
-        elinewidth=1.5,
-        capthick=1.5,
-    )
-
-    colors = ["red", "green"]
-    markers = ["s", "^"]
-    lines = [ln1]
-    for metric, label, color, marker in zip(
-        ["mean_dimensions_Dw", "mean_dimensions_Db"],
-        ["W (Mean Dimensions in $D_w$)", "B (Mean Dimensions in $D_b$)"],
-        colors,
-        markers,
-    ):
-        mean_vals = grouped[metric].mean()
-        sem_vals = grouped[metric].sem()
-        ln = ax2.errorbar(
-            mean_vals.index,
-            mean_vals.values,
-            yerr=sem_vals.values,
-            color=color,
-            label=label,
-            marker=marker,
-            capsize=5,
-            linestyle="-",
-            markersize=8,
-            elinewidth=1.5,
-            capthick=1.5,
-        )
-        lines.append(ln)
-
-    x_label = "\u03B5" if x_var == "epsilon" else "\u03B4"
-    ax1.set_xlabel(f"${x_label}$")
-    ax1.set_ylabel("Number of Preference Relations")
-    ax2.set_ylabel("Mean Number of Dimensions")
-
-    labels = [l.get_label() for l in lines]
-    ax1.legend(lines, labels, loc="upper left", bbox_to_anchor=(0.05, 1.15))
-
-    plt.title(f"Preference Relation Metrics vs {x_label}")
-    plt.grid(True, alpha=0.3)
+def create_plot(df: pd.DataFrame, output_path: Path) -> None:
+    """
+    Create a plot visualising the metrics across different epsilon and delta values.
+    
+    Args:
+        df: DataFrame containing the metrics to plot
+        output_path: Path where the plot should be saved
+    """
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Define metrics with their labels and styles
+    metrics = {
+        'N': ('Number of Preference Relations', '-', 'o'),    # Circle
+        'W': ('Average Dimensions in $D_w$', '--', 's'),     # Square
+        'B': ('Average Dimensions in $D_b$', ':', '^')       # Triangle
+    }
+    
+    # Define styles for each epsilon value
+    epsilons = sorted(df['epsilon'].unique())
+    styles_by_epsilon = {
+        epsilons[0]: {
+            'color': '#1f77b4',  # Blue
+            'linewidth': 2.0,
+            'alpha': 0.9,
+            'zorder': 2,         # Higher zorder means drawn on top
+            'markersize': 8      # Smaller markers for front layer
+        },
+        epsilons[1]: {
+            'color': '#d62728',  # Red
+            'linewidth': 1.5,
+            'alpha': 0.7,
+            'zorder': 1,
+            'markersize': 12     # Larger markers for background layer
+        }
+    }
+    
+    # Plot each metric separately to control ordering
+    for metric, (label, linestyle, marker) in metrics.items():
+        # Plot epsilon values in reverse order (so first epsilon is on top)
+        for epsilon in reversed(epsilons):
+            epsilon_data = df[df['epsilon'] == epsilon]
+            style = styles_by_epsilon[epsilon]
+            
+            # Sort by delta to ensure lines are connected in order
+            epsilon_data = epsilon_data.sort_values('delta')
+            
+            ax.plot(epsilon_data['delta'], 
+                   epsilon_data[metric],
+                   label=f'{label} (ε={epsilon:.2f})',
+                   color=style['color'],
+                   linestyle=linestyle,
+                   linewidth=style['linewidth'],
+                   alpha=style['alpha'],
+                   zorder=style['zorder'],
+                   marker=marker,
+                   markersize=style['markersize'],
+                   markerfacecolor='white',
+                   markeredgewidth=1.5,
+                   markeredgecolor=style['color'])
+    
+    # Customize plot appearance
+    ax.set_xlabel('δ')
+    ax.set_ylabel('Value')
+    ax.grid(True, alpha=0.3, zorder=0)  # Put grid behind everything
+    
+    # Adjust legend for better readability
+    ax.legend(bbox_to_anchor=(1.05, 1), 
+             loc='upper left',
+             borderaxespad=0,
+             frameon=True,
+             edgecolor='black',
+             fancybox=False)
+    
+    # Save the plot
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
-
-
-def create_epsilon_plot(df: pd.DataFrame, output_path: Path) -> None:
-    create_combined_plot(df, output_path, "epsilon")
-
-
-def create_delta_plot(df: pd.DataFrame, output_path: Path) -> None:
-    create_combined_plot(df, output_path, "delta")
