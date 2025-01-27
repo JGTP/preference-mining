@@ -19,6 +19,12 @@ if __name__ == "__main__":
         "--max_set_size", type=int, default=10, help="Maximum feature set size"
     )
     parser.add_argument(
+        "--top_features",
+        type=int,
+        default=20,
+        help="Number of top features to consider for stronger feature sets",
+    )
+    parser.add_argument(
         "--epsilon_start", type=float, default=0.05, help="Starting epsilon value"
     )
     parser.add_argument(
@@ -60,6 +66,7 @@ if __name__ == "__main__":
         "epsilons": epsilons,
         "deltas": deltas,
         "max_set_size": args.max_set_size,
+        "top_features": args.top_features,
     }
     execute_pipeline(
         data_path=args.data_path,

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from tqdm import tqdm
 import yaml
 from src.progress_logger import setup_progress_logging
 from src.preprocessing import DataPreprocessor
@@ -46,6 +47,7 @@ def execute_pipeline(
             "epsilons": [i / 20 for i in range(1, 11)],
             "deltas": [i / 20 for i in range(1, 11)],
             "max_set_size": 10,
+            "top_features": 20,
         }
     config = load_preprocessing_config(config_path)
     target_column = config.get("target").get("column")
@@ -80,6 +82,7 @@ def execute_pipeline(
         stable_rules = cross_validate_RIPPER(
             X, y, n_splits=n_splits, progress_logger=progress_logger
         )
+        tqdm.write(f"\nNumber of stable rules found: {len(stable_rules)}")
         progress_logger.close_progress_bar(ripper_id)
         bb_id = progress_logger.create_progress_bar(
             "blackbox", 100, "Training black box model"
@@ -93,6 +96,7 @@ def execute_pipeline(
             epsilons=analysis_config.get("epsilons"),
             deltas=analysis_config.get("deltas"),
             max_set_size=analysis_config.get("max_set_size", 10),
+            top_features=analysis_config.get("top_features", 20),
             progress_logger=progress_logger,
         )
         feature_analysis = analyser.analyse_ruleset(
@@ -106,13 +110,17 @@ def execute_pipeline(
             "black_box_results": bb_results,
             "feature_analysis_results": feature_analysis,
         }
-        df = process_results(feature_analysis)
+
+        # Pass the temp_dir to process_results
+        df = process_results(feature_analysis, analyser.temp_dir)
         create_epsilon_plot(df, output_dir / "epsilon_plot.pdf")
         create_delta_plot(df, output_dir / "delta_plot.pdf")
+
         output_path = save_json_results(
             pipeline_results, output_dir, "pipeline_results"
         )
         pipeline_results["output_path"] = output_path
+
         analyser.cleanup()  # Cleanup temp files after visualization
         progress_logger.shutdown()
         return pipeline_results

@@ -30,6 +30,7 @@ class EnhancedFeatureAnalyser:
         epsilons: List[float] = None,
         deltas: List[float] = None,
         max_set_size: int = 10,
+        top_features: int = 20,
         progress_logger: Optional[object] = None,
         temp_dir: Optional[str] = None,
     ):
@@ -38,6 +39,7 @@ class EnhancedFeatureAnalyser:
         self.epsilons = epsilons or [i / 20 for i in range(1, 11)]
         self.deltas = deltas or [0.05, 0.10, 0.15, 0.20, 0.25]
         self.max_set_size = max_set_size
+        self.top_features = top_features
         self.feature_names = X.columns.tolist()
         self.correlation_matrix = X.corr()
         self.progress_logger = progress_logger
@@ -79,10 +81,16 @@ class EnhancedFeatureAnalyser:
         corr_dict = {}
         for size in range(2, self.max_set_size + 1):
             for feature_set in combinations(self.feature_names, size):
-                max_corr = max(
+                # Get Pearson correlations between all pairs
+                correlations = [
                     abs(self.correlation_matrix.loc[f1, f2])
                     for f1, f2 in combinations(feature_set, 2)
-                )
+                ]
+                # If all correlations are NaN (e.g., for categorical features),
+                # treat as uncorrelated (0.0)
+                # If we have some valid correlations, use their maximum
+                valid_correlations = [c for c in correlations if not np.isnan(c)]
+                max_corr = max(valid_correlations) if valid_correlations else 0.0
                 corr_dict[str(sorted(list(feature_set)))] = float(max_corr)
 
         with open(self.temp_dir / "correlations.json", "w") as f:
@@ -154,50 +162,65 @@ class EnhancedFeatureAnalyser:
                         ) from e
         return self.X[mask]
 
-    def analyse_rule(self, rule) -> Dict:
+    def analyse_rule(self, rule):
         conditional_data = self._get_conditional_data(rule)
         if len(conditional_data) < 10:
             return {}
 
-        shap_values = self._get_shap_values()
-        results = {}
+        # Get SHAP values
+        with open(self.temp_dir / "shap_values.json", "r") as f:
+            shap_values = json.load(f)
 
-        batch_size = 1000
-        feature_combinations = []
+        # Sort features by importance and take top N
+        top_features = sorted(shap_values.items(), key=lambda x: x[1], reverse=True)[
+            : self.top_features
+        ]
+        top_feature_names = [f[0] for f in top_features]
+
+        # Generate combinations only from top features for set1
+        feature_combinations_set1 = []
         for size in range(1, self.max_set_size + 1):
-            feature_combinations.extend(combinations(self.feature_names, size))
+            feature_combinations_set1.extend(combinations(top_feature_names, size))
+
+        # Generate all combinations for set2 (less important features)
+        feature_combinations_set2 = []
+        for size in range(1, self.max_set_size + 1):
+            feature_combinations_set2.extend(combinations(self.feature_names, size))
+
+        results = {}
 
         for epsilon in self.epsilons:
             for delta in self.deltas:
                 valid_pairs = []
 
-                for i in range(0, len(feature_combinations), batch_size):
-                    batch = feature_combinations[i : i + batch_size]
-                    batch_pairs = combinations(batch, 2)
+                # Compare top feature combinations with all other combinations
+                for combo1 in feature_combinations_set1:
+                    set1 = set(combo1)
+                    if not self._check_correlation_threshold(set1, epsilon):
+                        continue
 
-                    for combo1, combo2 in batch_pairs:
-                        set1, set2 = set(combo1), set(combo2)
+                    for combo2 in feature_combinations_set2:
+                        set2 = set(combo2)
                         if not set1.intersection(set2):
                             imp1 = self._aggregate_importance(set1, shap_values)
                             imp2 = self._aggregate_importance(set2, shap_values)
 
                             if imp2 > 0 and (imp1 - imp2) / imp2 > delta:
-                                if self._check_correlation_threshold(set1, epsilon):
-                                    valid_pairs.append(
-                                        FeatureSetResult(
-                                            set1=set1,
-                                            set2=set2,
-                                            set1_importance=imp1,
-                                            set2_importance=imp2,
-                                            importance_difference=imp1 - imp2,
-                                            max_correlation_set1=self._get_correlation(
-                                                set1
-                                            ),
-                                            max_correlation_set2=self._get_correlation(
-                                                set2
-                                            ),
-                                        )
+                                valid_pairs.append(
+                                    FeatureSetResult(
+                                        set1=set1,
+                                        set2=set2,
+                                        set1_importance=imp1,
+                                        set2_importance=imp2,
+                                        importance_difference=imp1 - imp2,
+                                        max_correlation_set1=self._get_correlation(
+                                            set1
+                                        ),
+                                        max_correlation_set2=self._get_correlation(
+                                            set2
+                                        ),
                                     )
+                                )
 
                 if valid_pairs:
                     key = f"epsilon_{epsilon}_delta_{delta:.1f}%"
