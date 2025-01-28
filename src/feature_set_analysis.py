@@ -50,7 +50,7 @@ class EnhancedFeatureAnalyser:
         self.progress_logger = progress_logger
 
         logging.info(
-            f"Initializing feature analysis with {len(self.feature_names)} features"
+            f"Initialising feature analysis with {len(self.feature_names)} features"
         )
         logging.info(
             f"Using {len(self.epsilons)} epsilon values and {len(self.deltas)} delta values"
@@ -66,7 +66,7 @@ class EnhancedFeatureAnalyser:
             self.progress_logger.create_progress_bar(
                 "init_calculations",
                 3,
-                "Initializing feature calculations",
+                "Initialising feature calculations",
             )
 
         try:
@@ -248,7 +248,7 @@ class EnhancedFeatureAnalyser:
         for epsilon in self.epsilons:
             for delta in self.deltas:
                 valid_pairs = []
-                logging.info(f"Analyzing rule with epsilon={epsilon}, delta={delta}")
+                logging.info(f"Analysing rule with epsilon={epsilon}, delta={delta}")
 
                 rule_features = {cond["feature"] for cond in conditions}
 
@@ -298,7 +298,7 @@ class EnhancedFeatureAnalyser:
         """Analyze a full ruleset using parallel processing"""
         if self.progress_logger:
             self.progress_logger.create_progress_bar(
-                "ruleset_analysis", len(ruleset), "Analyzing ruleset"
+                "ruleset_analysis", len(ruleset), "Analysing ruleset"
             )
 
         results = {
@@ -331,7 +331,7 @@ class EnhancedFeatureAnalyser:
                         self.progress_logger.update_progress("ruleset_analysis", 1)
 
                 except Exception as e:
-                    logging.error(f"Error analyzing rule: {e}")
+                    logging.error(f"Error analysing rule: {e}")
 
         if output_dir:
             output_path = save_json_results(results, output_dir, "feature_analysis")

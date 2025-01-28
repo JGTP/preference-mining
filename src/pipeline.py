@@ -95,6 +95,15 @@ def execute_pipeline(
         progress_logger.update_progress(bb_id, 100)
         progress_logger.close_progress_bar(bb_id)
 
+        logging.info(f"\nDataset size after preprocessing: {len(X)} rows")
+        logging.info("\nModel Performance Metrics:")
+        logging.info("Cross-validation metrics:")
+        for metric, (mean, std) in bb_results["cv_metrics"].items():
+            logging.info(f"{metric}: {mean:.3f} ± {std:.3f}")
+        logging.info("\nTest set metrics:")
+        for metric, value in bb_results["test_metrics"].items():
+            logging.info(f"{metric}: {value:.3f}")
+
         analyser = EnhancedFeatureAnalyser(
             model=model.model,
             X=X,
