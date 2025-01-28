@@ -102,7 +102,7 @@ def execute_pipeline(
             deltas=analysis_config.get("deltas"),
             max_set_size=analysis_config.get("max_set_size", 10),
             top_features=analysis_config.get("top_features", 20),
-            enable_disk_cache=False,  # Disable disk caching
+            enable_disk_cache=False,
             progress_logger=progress_logger,
         )
 
@@ -110,7 +110,6 @@ def execute_pipeline(
             ruleset=stable_rules, output_dir=feature_analysis_dir
         )
 
-        # Use in-memory values for visualization
         df = process_results(
             feature_analysis,
             shap_values=analyser.shap_values,

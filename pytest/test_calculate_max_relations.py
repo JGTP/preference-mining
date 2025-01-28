@@ -65,37 +65,20 @@ def test_calculate_max_relations_simple_cases():
 
 def test_calculate_max_relations_parameter_relationships():
     """Test relationships between different parameter combinations with exact values"""
-    # Calculate specific values for N=5, max_set_size=2, top_features=3:
-    # set1 possibilities:
-    # - size 1: (3 choose 1) = 3 combinations
-    # - size 2: (3 choose 2) = 3 combinations
-    # For each size 1 set1 (3 of these):
-    # - can have set2 of size 1: (4 choose 1) = 4 possibilities
-    # - can have set2 of size 2: (4 choose 2) = 6 possibilities
-    # For each size 2 set1 (3 of these):
-    # - can have set2 of size 1: (3 choose 1) = 3 possibilities
-    # - can have set2 of size 2: (3 choose 2) = 3 possibilities
-    # Total: 3 * (4 + 6) + 3 * (3 + 3) = 30 + 18 = 48
+
     result1 = calculate_max_relations(N=5, max_set_size=2, top_features=3)
     assert result1 == 48
 
-    # Calculate for N=5, max_set_size=2, top_features=4
-    # Similar calculation but with more top features
     result2 = calculate_max_relations(N=5, max_set_size=2, top_features=4)
-    assert result2 > result1  # Should have more relations with more top features
+    assert result2 > result1
 
 
 def test_calculate_max_relations_edge_cases():
     """Test edge cases with calculated expected values"""
-    # When max_set_size=1, top_features=1, only one relation possible per remaining feature
-    assert (
-        calculate_max_relations(N=3, max_set_size=1, top_features=1) == 2
-    )  # Can pair with either of 2 remaining features
 
-    # When N=2, can only form minimal relations
-    assert (
-        calculate_max_relations(N=2, max_set_size=2, top_features=2) == 2
-    )  # Only one possible pairing
+    assert calculate_max_relations(N=3, max_set_size=1, top_features=1) == 2
+
+    assert calculate_max_relations(N=2, max_set_size=2, top_features=2) == 2
 
 
 def test_calculate_max_relations_larger_cases():

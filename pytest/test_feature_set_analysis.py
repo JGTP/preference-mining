@@ -60,7 +60,6 @@ def analyser_without_disk_cache(sample_data, trained_model):
 
 
 def test_initialisation_with_disk_cache(analyser_with_disk_cache):
-    """Test initialization with disk cache enabled"""
     assert len(analyser_with_disk_cache.epsilons) == 2
     assert len(analyser_with_disk_cache.deltas) == 2
     assert analyser_with_disk_cache.max_set_size == 3
@@ -73,7 +72,6 @@ def test_initialisation_with_disk_cache(analyser_with_disk_cache):
 
 
 def test_initialisation_without_disk_cache(analyser_without_disk_cache):
-    """Test initialization with disk cache disabled"""
     assert len(analyser_without_disk_cache.epsilons) == 2
     assert len(analyser_without_disk_cache.deltas) == 2
     assert analyser_without_disk_cache.max_set_size == 3
@@ -85,22 +83,17 @@ def test_initialisation_without_disk_cache(analyser_without_disk_cache):
 
 
 def test_cleanup(analyser_with_disk_cache, mock_temp_dir):
-    """Test cleanup of temporary files"""
-    # Store the path for later checking
+
     temp_dir_path = analyser_with_disk_cache.temp_dir
 
-    # Verify directory exists before cleanup
     assert temp_dir_path.exists()
     assert (temp_dir_path / "shap_values.json").exists()
     assert (temp_dir_path / "correlations.json").exists()
 
-    # Cleanup and delete analyzer
     analyser_with_disk_cache.cleanup()
 
-    # Verify directory is completely gone
     assert not temp_dir_path.exists()
 
-    # Verify specific files are gone (in case directory deletion failed)
     test_files = [
         temp_dir_path / "shap_values.json",
         temp_dir_path / "correlations.json",
@@ -109,12 +102,10 @@ def test_cleanup(analyser_with_disk_cache, mock_temp_dir):
 
 
 def test_no_cleanup_without_disk_cache(analyser_without_disk_cache):
-    """Test that cleanup doesn't raise errors when disk cache is disabled"""
-    analyser_without_disk_cache.cleanup()  # Should not raise any errors
+    analyser_without_disk_cache.cleanup()
 
 
 def test_shap_values_calculation(analyser_without_disk_cache):
-    """Test SHAP values calculation"""
     shap_values = analyser_without_disk_cache.shap_values
     assert isinstance(shap_values, dict)
     assert len(shap_values) == len(analyser_without_disk_cache.feature_names)
@@ -122,14 +113,12 @@ def test_shap_values_calculation(analyser_without_disk_cache):
 
 
 def test_correlation_calculation(analyser_without_disk_cache):
-    """Test correlation calculation"""
     correlations = analyser_without_disk_cache.correlations
     assert isinstance(correlations, dict)
     assert all(isinstance(v, float) for v in correlations.values())
 
 
 def test_feature_combinations(analyser_without_disk_cache):
-    """Test feature combinations pre-computation"""
     combinations = analyser_without_disk_cache.feature_combinations
     assert isinstance(combinations, dict)
     assert "set1" in combinations
@@ -139,7 +128,6 @@ def test_feature_combinations(analyser_without_disk_cache):
 
 
 def test_analyse_rule(analyser_without_disk_cache):
-    """Test rule analysis"""
 
     class MockRule:
         def __init__(self):
@@ -154,7 +142,6 @@ def test_analyse_rule(analyser_without_disk_cache):
 
 
 def test_analyse_ruleset(analyser_without_disk_cache):
-    """Test ruleset analysis"""
 
     class MockRule:
         def __init__(self):
@@ -174,14 +161,12 @@ def test_analyse_ruleset(analyser_without_disk_cache):
 
 
 def test_empty_ruleset(analyser_without_disk_cache):
-    """Test analysis of empty ruleset"""
     result = analyser_without_disk_cache.analyse_ruleset([])
     assert result["rule_analyses"] == {}
     assert "metadata" in result
 
 
 def test_invalid_max_set_size(sample_data, trained_model):
-    """Test initialization with invalid max_set_size"""
     analyser = EnhancedFeatureAnalyser(
         model=trained_model, X=sample_data, max_set_size=0, enable_disk_cache=False
     )
@@ -189,13 +174,11 @@ def test_invalid_max_set_size(sample_data, trained_model):
 
 
 def test_error_handling_model_none(sample_data):
-    """Test error handling when model is None"""
     with pytest.raises(Exception):
         EnhancedFeatureAnalyser(model=None, X=sample_data, enable_disk_cache=False)
 
 
 def test_directory_creation_with_disk_cache(sample_data, trained_model, mock_temp_dir):
-    """Test temporary directory creation with disk cache"""
     nested_dir = mock_temp_dir / "nested" / "temp"
     analyser = EnhancedFeatureAnalyser(
         model=trained_model, X=sample_data, enable_disk_cache=True, temp_dir=nested_dir
@@ -207,12 +190,10 @@ def test_directory_creation_with_disk_cache(sample_data, trained_model, mock_tem
 
 
 def test_feature_importance_consistency(analyser_without_disk_cache):
-    """Test consistency of feature importance calculations"""
-    # Get feature importances from two different methods
+
     shap_values = analyser_without_disk_cache.shap_values
     combinations = analyser_without_disk_cache.feature_combinations
 
-    # Check individual feature importances match
     for feature in analyser_without_disk_cache.feature_names:
         single_feature_sets = [
             combo

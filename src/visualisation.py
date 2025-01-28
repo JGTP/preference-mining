@@ -1,69 +1,29 @@
 import json
-
 import numpy as np
-
 import pandas as pd
-
 import matplotlib.pyplot as plt
-
 from pathlib import Path
-
 from typing import Dict, Any, Optional, Union
-
 from collections import defaultdict
 
 
 def calculate_max_relations(N: int, max_set_size: int, top_features: int) -> int:
-    """
-
-    Calculate theoretical maximum number of preference relations.
-
-    Args:
-
-        N: Total number of features
-
-        max_set_size: Maximum size of feature sets
-
-        top_features: Number of top features to consider for set1
-
-    Returns:
-
-        int: Maximum possible number of preference relations
-
-    """
-
     total = 0
-
     for set1_size in range(1, min(max_set_size, top_features) + 1):
 
-        # Calculate number of ways to choose set1_size items from top_features
-
         set1_count = 1
-
         for i in range(set1_size):
-
             set1_count = set1_count * (top_features - i) // (i + 1)
 
-        # For each set1, calculate valid set2 combinations
-
-        # Available features for set2 are those not in top_features, plus unused top features
-
         remaining_features = (N - top_features) + (top_features - set1_size)
-
         set2_total = 0
 
         for i in range(1, max_set_size + 1):
-
             if i <= remaining_features:
 
-                # Calculate number of ways to choose i items from remaining_features
-
                 set2_count = 1
-
                 for j in range(i):
-
                     set2_count = set2_count * (remaining_features - j) // (j + 1)
-
                 set2_total += set2_count
 
         total += set1_count * set2_total
@@ -77,10 +37,6 @@ def process_results(
     correlations: Optional[Dict[str, float]] = None,
     temp_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
-    """
-    Process the analysis results into a DataFrame suitable for plotting.
-    Now correctly tracks total and unique relations.
-    """
     if shap_values is None or correlations is None:
         if temp_dir is None:
             raise ValueError(
@@ -95,17 +51,16 @@ def process_results(
         except Exception as e:
             raise ValueError(f"Failed to load cached values from temp_dir: {e}")
 
-    # Create a defaultdict for metrics
     metrics_by_params = defaultdict(
         lambda: {
-            "all_relations": [],  # List to store ALL relations (including duplicates)
-            "unique_pairs": set(),  # Set to store unique feature set pairs
+            "all_relations": [],
+            "unique_pairs": set(),
             "W": [],
             "B": [],
+            "size_dist": defaultdict(int),
         }
     )
 
-    # First pass: collect all metrics for each epsilon-delta combination
     for rule_id, rule_info in results["rule_analyses"].items():
         rule_string = rule_info["rule_string"]
         for param_key, analyses in rule_info["analysis"].items():
@@ -114,48 +69,129 @@ def process_results(
 
             if analyses:
                 for analysis in analyses["relations"]:
-                    # Create hashable versions of the feature sets
+
                     set1_frozen = frozenset(analysis["set1"])
                     set2_frozen = frozenset(analysis["set2"])
                     feature_pair = (set1_frozen, set2_frozen)
 
-                    # Store ALL relations (including duplicates)
                     metrics_by_params[(epsilon, delta)]["all_relations"].append(
                         feature_pair
                     )
 
-                    # Store unique pairs
                     metrics_by_params[(epsilon, delta)]["unique_pairs"].add(
                         feature_pair
                     )
 
-                    # Track dimensions
-                    metrics_by_params[(epsilon, delta)]["W"].append(
-                        len(analysis["set1"])
-                    )
-                    metrics_by_params[(epsilon, delta)]["B"].append(
-                        len(analysis["set2"])
-                    )
+                    w_size = len(analysis["set1"])
+                    b_size = len(analysis["set2"])
+                    metrics_by_params[(epsilon, delta)]["W"].append(w_size)
+                    metrics_by_params[(epsilon, delta)]["B"].append(b_size)
 
-    # Second pass: compute metrics
+                    size_key = f"({w_size},{b_size})"
+                    metrics_by_params[(epsilon, delta)]["size_dist"][size_key] += 1
+
     rows = []
     for (epsilon, delta), metrics in metrics_by_params.items():
-        # Total relations is now the raw count of all relations found
+
         total_relations = len(metrics["all_relations"])
-        # Unique relations remains the count of unique feature set pairs
+
         unique_relations = len(metrics["unique_pairs"])
+
+        size_dist = metrics["size_dist"]
+        if total_relations > 0:
+            size_dist_pct = {
+                size: (count / total_relations * 100)
+                for size, count in size_dist.items()
+            }
+        else:
+            size_dist_pct = {}
 
         row = {
             "epsilon": epsilon,
             "delta": delta,
-            "N_total": total_relations,  # Raw count including duplicates
-            "N_unique": unique_relations,  # Count after deduplication
+            "N_total": total_relations,
+            "N_unique": unique_relations,
             "W": np.mean(metrics["W"]) if metrics["W"] else 0,
             "B": np.mean(metrics["B"]) if metrics["B"] else 0,
+            "size_distribution": size_dist_pct,
         }
         rows.append(row)
 
     return pd.DataFrame(rows)
+
+
+def create_dimension_distribution(
+    df: pd.DataFrame,
+    output_dir: Path,
+    max_set_size: int,
+    test_size: Optional[int] = None,
+    n_splits: int = 3,
+) -> None:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    epsilons = sorted(df["epsilon"].unique())
+    n_plots = len(epsilons)
+    n_cols = min(3, n_plots)
+    n_rows = (n_plots + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), squeeze=False
+    )
+
+    size_combinations = [
+        f"({i},{j})"
+        for i in range(1, max_set_size + 1)
+        for j in range(1, max_set_size + 1)
+    ]
+
+    for idx, epsilon in enumerate(epsilons):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = axes[row, col]
+
+        epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
+        deltas = epsilon_data["delta"].values
+
+        heatmap_data = np.zeros((len(size_combinations), len(deltas)))
+
+        for i, delta in enumerate(deltas):
+            delta_row = epsilon_data[epsilon_data["delta"] == delta]
+            if not delta_row.empty:
+                size_dist = delta_row["size_distribution"].iloc[0]
+                for j, size_combo in enumerate(size_combinations):
+                    heatmap_data[j, i] = size_dist.get(size_combo, 0)
+
+        im = ax.imshow(heatmap_data, aspect="auto", cmap="Blues")
+
+        ax.set_xticks(range(len(deltas)))
+        ax.set_xticklabels([f"{d:.2f}" for d in deltas], rotation=45)
+        ax.set_yticks(range(len(size_combinations)))
+        ax.set_yticklabels(size_combinations)
+
+        ax.set_xlabel("δ")
+        ax.set_ylabel("Set Sizes (|Dw|, |Db|)")
+        ax.set_title(f"ε = {epsilon:.2f}")
+
+        plt.colorbar(im, ax=ax, label="Percentage of Relations")
+
+    for idx in range(n_plots, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        axes[row, col].remove()
+
+    fig.tight_layout()
+
+    params = [
+        f"max{max_set_size}",
+        f"splits{n_splits}",
+    ]
+    if test_size is not None:
+        params.append(f"test{test_size}")
+
+    filename = f"dimension_distribution_{'_'.join(params)}.pdf"
+    fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def create_plots(
@@ -168,31 +204,15 @@ def create_plots(
     n_splits: int = 3,
     total_features: int = None,
 ) -> None:
-    """
-
-    Create two separate multi-panel figures with improved visualization.
-
-    """
-
     output_dir = Path(output_dir)
-
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Calculate theoretical maximum number of relations
 
     max_relations = calculate_max_relations(total_features, max_set_size, top_features)
 
-    # Sort epsilon values and calculate number of rows/columns for subplots
-
     epsilons = sorted(df["epsilon"].unique())
-
     n_plots = len(epsilons)
-
     n_cols = min(3, n_plots)
-
     n_rows = (n_plots + n_cols - 1) // n_cols
-
-    # Figure 1: Relations (N_total and N_unique)
 
     fig_relations, axes_relations = plt.subplots(
         n_rows + 1,
@@ -202,12 +222,9 @@ def create_plots(
         squeeze=False,
     )
 
-    # Add summary text in the top row
-
     summary_text = (
-        f"Total Rules: {n_rules}\nMaximum Possible Relations: {max_relations}"
+        f"Total Rules: {n_rules}\nMaximum Possible Unique Relations: {max_relations}"
     )
-
     axes_relations[0, 0].text(
         0.5,
         0.5,
@@ -216,38 +233,23 @@ def create_plots(
         va="center",
         transform=axes_relations[0, 0].transAxes,
     )
-
     axes_relations[0, 0].axis("off")
 
     for j in range(1, n_cols):
-
         axes_relations[0, j].axis("off")
-
-    # Figure 2: Dimensions (W and B)
 
     fig_dimensions, axes_dimensions = plt.subplots(
         n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False
     )
 
-    # Plot for each epsilon value
-
     for idx, epsilon in enumerate(epsilons):
-
-        row = (idx // n_cols) + 1  # +1 to account for summary row in relations plot
-
+        row = (idx // n_cols) + 1
         col = idx % n_cols
-
-        # Get data for this epsilon
 
         epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
 
-        # Plot 1: Relations
-
         ax1 = axes_relations[row, col]
-
         ax2 = ax1.twinx()
-
-        # Plot N_total on primary y-axis
 
         l1 = ax1.plot(
             epsilon_data["delta"],
@@ -259,8 +261,6 @@ def create_plots(
             markerfacecolor="white",
         )
 
-        # Plot N_unique on secondary y-axis
-
         l2 = ax2.plot(
             epsilon_data["delta"],
             epsilon_data["N_unique"],
@@ -271,31 +271,17 @@ def create_plots(
             markerfacecolor="white",
         )
 
-        # Labels and title for relations plot
-
         ax1.set_xlabel("δ")
-
         ax1.set_ylabel("Total Relations")
-
         ax2.set_ylabel("Unique Relations")
-
         ax1.set_title(f"ε = {epsilon:.2f}")
-
         ax1.grid(True, alpha=0.3)
 
-        # Add legend
-
         lines = l1 + l2
-
         labels = [l.get_label() for l in lines]
-
         ax1.legend(lines, labels, loc="upper right")
 
-        # Plot 2: Dimensions
-
         ax = axes_dimensions[idx // n_cols, col]
-
-        # Plot W and B on same y-axis
 
         ax.plot(
             epsilon_data["delta"],
@@ -306,7 +292,6 @@ def create_plots(
             markersize=6,
             markerfacecolor="white",
         )
-
         ax.plot(
             epsilon_data["delta"],
             epsilon_data["B"],
@@ -317,56 +302,35 @@ def create_plots(
             markerfacecolor="white",
         )
 
-        # Labels and title for dimensions plot
-
         ax.set_xlabel("δ")
-
         ax.set_ylabel("Average Dimensions")
-
         ax.set_title(f"ε = {epsilon:.2f}")
-
         ax.grid(True, alpha=0.3)
-
         ax.legend(loc="upper right")
 
-    # Remove empty subplots if any
-
     for idx in range(n_plots, n_rows * n_cols):
-
-        row = (idx // n_cols) + 1  # +1 for summary row
-
+        row = (idx // n_cols) + 1
         col = idx % n_cols
-
         axes_relations[row, col].remove()
 
     for idx in range(n_plots, n_rows * n_cols):
-
         row = idx // n_cols
-
         col = idx % n_cols
-
         axes_dimensions[row, col].remove()
 
-    # Adjust layout and save figures
-
     for fig, name in [(fig_relations, "relations"), (fig_dimensions, "dimensions")]:
-
         fig.tight_layout()
-
-        # Create filename with parameters
 
         params = [
             f"max{max_set_size}",
             f"top{top_features}",
             f"splits{n_splits}",
         ]
-
         if test_size is not None:
-
             params.append(f"test{test_size}")
 
         filename = f"{name}_plot_{'_'.join(params)}.pdf"
-
         fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
-
         plt.close(fig)
+
+    create_dimension_distribution(df, output_dir, max_set_size, test_size, n_splits)

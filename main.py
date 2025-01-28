@@ -50,7 +50,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Generate delta values using step sizes
     deltas = [
         x * args.delta_step + args.delta_start
         for x in range(int((args.delta_end - args.delta_start) / args.delta_step) + 1)
@@ -62,7 +61,7 @@ if __name__ == "__main__":
         "max_set_size": args.max_set_size,
         "top_features": args.top_features,
     }
-    
+
     execute_pipeline(
         data_path=args.data_path,
         test_size=args.test_size,

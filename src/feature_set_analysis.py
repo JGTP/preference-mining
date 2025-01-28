@@ -37,20 +37,7 @@ class EnhancedFeatureAnalyser:
         temp_dir: Optional[str] = None,
         progress_logger: Optional[Any] = None,
     ):
-        """
-        Initialize the feature analyser with optional disk caching.
 
-        Args:
-            model: Trained model to analyze
-            X: Input features DataFrame
-            epsilons: List of correlation thresholds
-            deltas: List of importance difference thresholds
-            max_set_size: Maximum size of feature sets to consider
-            top_features: Number of top features to consider for set1
-            enable_disk_cache: If True, cache intermediate results to disk
-            temp_dir: Directory for cached files (only used if enable_disk_cache=True)
-            progress_logger: Optional progress logger
-        """
         self.model = model
         self.X = X
         self.epsilons = epsilons or [i / 20 for i in range(1, 11)]
@@ -69,23 +56,21 @@ class EnhancedFeatureAnalyser:
             f"Using {len(self.epsilons)} epsilon values and {len(self.deltas)} delta values"
         )
 
-        # Initialize disk cache if enabled
         if enable_disk_cache:
             self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp())
             self.temp_dir.mkdir(parents=True, exist_ok=True)
         else:
             self.temp_dir = None
 
-        # Initialize progress tracking
         if self.progress_logger:
             self.progress_logger.create_progress_bar(
                 "init_calculations",
-                3,  # Three main initialization steps
+                3,
                 "Initializing feature calculations",
             )
 
         try:
-            # Pre-compute and cache in memory
+
             self.shap_values = self._calculate_shap_values()
             if self.progress_logger:
                 self.progress_logger.update_progress("init_calculations", 1)
@@ -98,7 +83,6 @@ class EnhancedFeatureAnalyser:
             if self.progress_logger:
                 self.progress_logger.update_progress("init_calculations", 1)
 
-            # Optionally cache to disk
             if self.enable_disk_cache:
                 self._cache_to_disk()
 
@@ -185,11 +169,10 @@ class EnhancedFeatureAnalyser:
     def _precompute_combinations(self) -> Dict[str, List[Dict]]:
         """Pre-compute all feature combinations with their sets and metrics"""
         combinations_dict = {
-            "set1": [],  # from top features
-            "set2": [],  # from all features
+            "set1": [],
+            "set2": [],
         }
 
-        # Get top feature names based on SHAP values
         top_features = sorted(
             self.shap_values.items(), key=lambda x: x[1], reverse=True
         )[: self.top_features]
@@ -207,9 +190,8 @@ class EnhancedFeatureAnalyser:
                 "Computing feature combinations",
             )
 
-        # Pre-compute all combinations and their metrics
         for size in range(1, self.max_set_size + 1):
-            # Set 1 combinations (from top features)
+
             for combo in combinations(top_feature_names, size):
                 feature_set = frozenset(combo)
                 importance = sum(self.shap_values[f] for f in feature_set)
@@ -228,7 +210,6 @@ class EnhancedFeatureAnalyser:
                 if self.progress_logger:
                     self.progress_logger.update_progress("combinations_calc", 1)
 
-            # Set 2 combinations (from all features)
             for combo in combinations(self.feature_names, size):
                 feature_set = frozenset(combo)
                 importance = sum(self.shap_values[f] for f in feature_set)
@@ -254,7 +235,6 @@ class EnhancedFeatureAnalyser:
         results = {}
         rule_str = str(rule)
 
-        # Extract rule conditions
         conditions = []
         for cond in rule.conds:
             feature_idx = cond.feature
@@ -270,11 +250,8 @@ class EnhancedFeatureAnalyser:
                 valid_pairs = []
                 logging.info(f"Analyzing rule with epsilon={epsilon}, delta={delta}")
 
-                # Get features mentioned in this rule's conditions
                 rule_features = {cond["feature"] for cond in conditions}
 
-                # Filter set1 combinations based on correlation threshold
-                # AND require at least one feature from the rule conditions
                 valid_set1 = [
                     combo
                     for combo in self.feature_combinations["set1"]
@@ -284,7 +261,6 @@ class EnhancedFeatureAnalyser:
                     )
                 ]
 
-                # Find valid pairs
                 for combo1 in valid_set1:
                     for combo2 in self.feature_combinations["set2"]:
                         if not combo1["features"].intersection(combo2["features"]):
