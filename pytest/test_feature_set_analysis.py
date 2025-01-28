@@ -35,136 +35,127 @@ def mock_temp_dir(tmpdir):
 
 
 @pytest.fixture
-def analyser(sample_data, trained_model, mock_temp_dir):
+def analyser_with_disk_cache(sample_data, trained_model, mock_temp_dir):
     return EnhancedFeatureAnalyser(
         model=trained_model,
         X=sample_data,
         epsilons=[0.1, 0.2],
         deltas=[0.1, 0.2],
         max_set_size=3,
+        enable_disk_cache=True,
         temp_dir=mock_temp_dir,
     )
 
 
-def test_initialisation(analyser):
-    assert len(analyser.epsilons) == 2
-    assert len(analyser.deltas) == 2
-    assert analyser.max_set_size == 3
-    assert len(analyser.feature_names) == 4
-    assert isinstance(analyser.correlation_matrix, pd.DataFrame)
-
-
-def test_temp_file_management(analyser):
-    assert analyser.temp_dir.exists()
-    assert (analyser.temp_dir / "shap_values.json").exists()
-    assert (analyser.temp_dir / "correlations.json").exists()
-
-    temp_dir = analyser.temp_dir
-    analyser.cleanup()
-    assert not temp_dir.exists()
-
-
-def test_shap_values_persistence(analyser):
-    with open(analyser.temp_dir / "shap_values.json", "r") as f:
-        stored_values = json.load(f)
-    assert isinstance(stored_values, dict)
-    assert len(stored_values) == len(analyser.feature_names)
-    assert all(isinstance(v, float) for v in stored_values.values())
-
-
-def test_correlation_persistence(analyser):
-    with open(analyser.temp_dir / "correlations.json", "r") as f:
-        stored_correlations = json.load(f)
-    assert isinstance(stored_correlations, dict)
-    assert all(isinstance(v, float) for v in stored_correlations.values())
-
-
-def test_analyser_with_temp_dir(sample_data, trained_model, mock_temp_dir):
-    analyser = EnhancedFeatureAnalyser(
-        model=trained_model, X=sample_data, temp_dir=mock_temp_dir
+@pytest.fixture
+def analyser_without_disk_cache(sample_data, trained_model):
+    return EnhancedFeatureAnalyser(
+        model=trained_model,
+        X=sample_data,
+        epsilons=[0.1, 0.2],
+        deltas=[0.1, 0.2],
+        max_set_size=3,
+        enable_disk_cache=False,
     )
-    assert analyser.temp_dir == mock_temp_dir
-    assert (mock_temp_dir / "shap_values.json").exists()
-    analyser.cleanup()
 
 
-def test_error_handling_temp_files(sample_data, trained_model, mock_temp_dir):
-    with pytest.raises(Exception):
-        EnhancedFeatureAnalyser(model=None, X=sample_data, temp_dir=mock_temp_dir)
-    assert not (mock_temp_dir / "shap_values.json").exists()
+def test_initialisation_with_disk_cache(analyser_with_disk_cache):
+    """Test initialization with disk cache enabled"""
+    assert len(analyser_with_disk_cache.epsilons) == 2
+    assert len(analyser_with_disk_cache.deltas) == 2
+    assert analyser_with_disk_cache.max_set_size == 3
+    assert len(analyser_with_disk_cache.feature_names) == 4
+    assert isinstance(analyser_with_disk_cache.correlation_matrix, pd.DataFrame)
+    assert analyser_with_disk_cache.temp_dir is not None
+    assert analyser_with_disk_cache.temp_dir.exists()
+    assert (analyser_with_disk_cache.temp_dir / "shap_values.json").exists()
+    assert (analyser_with_disk_cache.temp_dir / "correlations.json").exists()
 
 
-def test_correlation_threshold(analyser):
-    test_data = pd.DataFrame(
-        {
-            "feature_a": [1, 2, 3, 4],
-            "feature_b": [2, 4, 6, 8],
-            "feature_c": [1, 3, 2, 4],
-            "feature_d": [-1, -2, -3, -4],
-        }
-    )
-    analyser.correlation_matrix = test_data.corr()
-    analyser._store_correlations()
-
-    assert not analyser._check_correlation_threshold(
-        {"feature_a", "feature_b"}, epsilon=0.5
-    )
-    assert analyser._check_correlation_threshold(
-        {"feature_a", "feature_c"}, epsilon=0.9
-    )
-    assert not analyser._check_correlation_threshold(
-        {"feature_a", "feature_d"}, epsilon=0.5
-    )
-    assert not analyser._check_correlation_threshold(
-        {"feature_a", "feature_b", "feature_c"}, epsilon=0.5
-    )
-    assert analyser._check_correlation_threshold({"feature_a"}, epsilon=0.5)
-    assert analyser._check_correlation_threshold(set(), epsilon=0.5)
+def test_initialisation_without_disk_cache(analyser_without_disk_cache):
+    """Test initialization with disk cache disabled"""
+    assert len(analyser_without_disk_cache.epsilons) == 2
+    assert len(analyser_without_disk_cache.deltas) == 2
+    assert analyser_without_disk_cache.max_set_size == 3
+    assert len(analyser_without_disk_cache.feature_names) == 4
+    assert isinstance(analyser_without_disk_cache.correlation_matrix, pd.DataFrame)
+    assert analyser_without_disk_cache.temp_dir is None
+    assert analyser_without_disk_cache.shap_values is not None
+    assert analyser_without_disk_cache.correlations is not None
 
 
-def test_aggregate_importance(analyser):
-    importances = {
-        "feature_a": 0.4,
-        "feature_b": 0.3,
-        "feature_c": 0.2,
-        "feature_d": 0.1,
-    }
-    feature_set = {"feature_a", "feature_b"}
-    result = analyser._aggregate_importance(feature_set, importances)
-    assert isinstance(result, float)
-    assert result == pytest.approx(0.7)
+def test_cleanup(analyser_with_disk_cache, mock_temp_dir):
+    """Test cleanup of temporary files"""
+    # Store the path for later checking
+    temp_dir_path = analyser_with_disk_cache.temp_dir
+
+    # Verify directory exists before cleanup
+    assert temp_dir_path.exists()
+    assert (temp_dir_path / "shap_values.json").exists()
+    assert (temp_dir_path / "correlations.json").exists()
+
+    # Cleanup and delete analyzer
+    analyser_with_disk_cache.cleanup()
+
+    # Verify directory is completely gone
+    assert not temp_dir_path.exists()
+
+    # Verify specific files are gone (in case directory deletion failed)
+    test_files = [
+        temp_dir_path / "shap_values.json",
+        temp_dir_path / "correlations.json",
+    ]
+    assert all(not f.exists() for f in test_files)
 
 
-def test_get_conditional_data(analyser, sample_data):
-    class MockCondition:
-        def __init__(self):
-            self.feature = 0
-            self.val = 0.5
-
-        def __str__(self):
-            return "feature_a <= 0.5"
-
-    class MockRule:
-        def __init__(self):
-            self.conds = [MockCondition()]
-
-    rule = MockRule()
-    result = analyser._get_conditional_data(rule)
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) <= len(sample_data)
+def test_no_cleanup_without_disk_cache(analyser_without_disk_cache):
+    """Test that cleanup doesn't raise errors when disk cache is disabled"""
+    analyser_without_disk_cache.cleanup()  # Should not raise any errors
 
 
-def test_analyse_rule(analyser):
+def test_shap_values_calculation(analyser_without_disk_cache):
+    """Test SHAP values calculation"""
+    shap_values = analyser_without_disk_cache.shap_values
+    assert isinstance(shap_values, dict)
+    assert len(shap_values) == len(analyser_without_disk_cache.feature_names)
+    assert all(isinstance(v, float) for v in shap_values.values())
+
+
+def test_correlation_calculation(analyser_without_disk_cache):
+    """Test correlation calculation"""
+    correlations = analyser_without_disk_cache.correlations
+    assert isinstance(correlations, dict)
+    assert all(isinstance(v, float) for v in correlations.values())
+
+
+def test_feature_combinations(analyser_without_disk_cache):
+    """Test feature combinations pre-computation"""
+    combinations = analyser_without_disk_cache.feature_combinations
+    assert isinstance(combinations, dict)
+    assert "set1" in combinations
+    assert "set2" in combinations
+    assert all(isinstance(combo, dict) for combo in combinations["set1"])
+    assert all(isinstance(combo, dict) for combo in combinations["set2"])
+
+
+def test_analyse_rule(analyser_without_disk_cache):
+    """Test rule analysis"""
+
     class MockRule:
         def __init__(self):
             self.conds = []
 
+        def __str__(self):
+            return "mock_rule"
+
     rule = MockRule()
-    result = analyser.analyse_rule(rule)
+    result = analyser_without_disk_cache.analyse_rule(rule)
     assert isinstance(result, dict)
 
 
-def test_analyse_ruleset(analyser):
+def test_analyse_ruleset(analyser_without_disk_cache):
+    """Test ruleset analysis"""
+
     class MockRule:
         def __init__(self):
             self.conds = []
@@ -173,26 +164,62 @@ def test_analyse_ruleset(analyser):
             return "mock_rule"
 
     ruleset = [MockRule(), MockRule()]
-    result = analyser.analyse_ruleset(ruleset)
+    result = analyser_without_disk_cache.analyse_ruleset(ruleset)
     assert isinstance(result, dict)
     assert "rule_analyses" in result
     assert "metadata" in result
     assert "epsilons" in result["metadata"]
     assert "deltas" in result["metadata"]
     assert "max_set_size" in result["metadata"]
-    analyser.cleanup()
 
 
-def test_empty_ruleset(analyser):
-    result = analyser.analyse_ruleset([])
+def test_empty_ruleset(analyser_without_disk_cache):
+    """Test analysis of empty ruleset"""
+    result = analyser_without_disk_cache.analyse_ruleset([])
     assert result["rule_analyses"] == {}
     assert "metadata" in result
-    analyser.cleanup()
 
 
-def test_invalid_max_set_size(sample_data, trained_model, mock_temp_dir):
+def test_invalid_max_set_size(sample_data, trained_model):
+    """Test initialization with invalid max_set_size"""
     analyser = EnhancedFeatureAnalyser(
-        model=trained_model, X=sample_data, max_set_size=0, temp_dir=mock_temp_dir
+        model=trained_model, X=sample_data, max_set_size=0, enable_disk_cache=False
     )
     assert analyser.max_set_size == 0
+
+
+def test_error_handling_model_none(sample_data):
+    """Test error handling when model is None"""
+    with pytest.raises(Exception):
+        EnhancedFeatureAnalyser(model=None, X=sample_data, enable_disk_cache=False)
+
+
+def test_directory_creation_with_disk_cache(sample_data, trained_model, mock_temp_dir):
+    """Test temporary directory creation with disk cache"""
+    nested_dir = mock_temp_dir / "nested" / "temp"
+    analyser = EnhancedFeatureAnalyser(
+        model=trained_model, X=sample_data, enable_disk_cache=True, temp_dir=nested_dir
+    )
+    assert nested_dir.exists()
+    assert (nested_dir / "shap_values.json").exists()
+    assert (nested_dir / "correlations.json").exists()
     analyser.cleanup()
+
+
+def test_feature_importance_consistency(analyser_without_disk_cache):
+    """Test consistency of feature importance calculations"""
+    # Get feature importances from two different methods
+    shap_values = analyser_without_disk_cache.shap_values
+    combinations = analyser_without_disk_cache.feature_combinations
+
+    # Check individual feature importances match
+    for feature in analyser_without_disk_cache.feature_names:
+        single_feature_sets = [
+            combo
+            for combo in combinations["set1"]
+            if len(combo["features"]) == 1 and feature in combo["features"]
+        ]
+        if single_feature_sets:
+            assert (
+                abs(single_feature_sets[0]["importance"] - shap_values[feature]) < 1e-10
+            )
