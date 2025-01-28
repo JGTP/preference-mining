@@ -10,6 +10,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from src.utils import save_json_results, convert_to_serialisable
+from src.ripper import determine_operator
 
 
 @dataclass
@@ -212,8 +213,10 @@ class EnhancedFeatureAnalyser:
             for combo in combinations(top_feature_names, size):
                 feature_set = frozenset(combo)
                 importance = sum(self.shap_values[f] for f in feature_set)
-                correlation = max(
-                    self.correlations.get(str(sorted(list(feature_set))), 0.0), 0.0
+                correlation = (
+                    max(self.correlations.get(str(sorted(list(combo))), 0.0), 0.0)
+                    if size > 1
+                    else 0.0
                 )
                 combinations_dict["set1"].append(
                     {
@@ -229,8 +232,10 @@ class EnhancedFeatureAnalyser:
             for combo in combinations(self.feature_names, size):
                 feature_set = frozenset(combo)
                 importance = sum(self.shap_values[f] for f in feature_set)
-                correlation = max(
-                    self.correlations.get(str(sorted(list(feature_set))), 0.0), 0.0
+                correlation = (
+                    max(self.correlations.get(str(sorted(list(combo))), 0.0), 0.0)
+                    if size > 1
+                    else 0.0
                 )
                 combinations_dict["set2"].append(
                     {
@@ -245,27 +250,38 @@ class EnhancedFeatureAnalyser:
         return combinations_dict
 
     def analyse_rule(self, rule) -> Dict:
-        """Analyze a single rule using pre-computed values"""
+        """Analyze a single rule to find its specific preference relations."""
         results = {}
+        rule_str = str(rule)
 
-        if self.progress_logger:
-            total_combinations = len(self.epsilons) * len(self.deltas)
-            self.progress_logger.create_progress_bar(
-                f"rule_analysis_{id(rule)}",
-                total_combinations,
-                f"Analyzing rule: {str(rule)[:30]}...",
+        # Extract rule conditions
+        conditions = []
+        for cond in rule.conds:
+            feature_idx = cond.feature
+            feature_name = self.feature_names[feature_idx]
+            operator = determine_operator(str(cond))
+            value = convert_to_serialisable(cond.val)
+            conditions.append(
+                {"feature": feature_name, "operator": operator, "value": value}
             )
 
         for epsilon in self.epsilons:
             for delta in self.deltas:
                 valid_pairs = []
-                logging.info(f"Analyzing with epsilon={epsilon}, delta={delta}")
+                logging.info(f"Analyzing rule with epsilon={epsilon}, delta={delta}")
+
+                # Get features mentioned in this rule's conditions
+                rule_features = {cond["feature"] for cond in conditions}
 
                 # Filter set1 combinations based on correlation threshold
+                # AND require at least one feature from the rule conditions
                 valid_set1 = [
                     combo
                     for combo in self.feature_combinations["set1"]
-                    if combo["correlation"] <= epsilon
+                    if (
+                        combo["correlation"] <= epsilon
+                        and rule_features.intersection(combo["features"])
+                    )
                 ]
 
                 # Find valid pairs
@@ -289,23 +305,17 @@ class EnhancedFeatureAnalyser:
                                 )
 
                 if valid_pairs:
-                    key = f"epsilon_{epsilon}_delta_{delta:.1f}%"
-                    results[key] = [self._format_result(pair) for pair in valid_pairs]
-
-                    # Optionally cache results to disk
-                    if self.enable_disk_cache:
-                        try:
-                            with open(
-                                self.temp_dir / f"results_e{epsilon}_d{delta}.json", "w"
-                            ) as f:
-                                json.dump(results[key], f)
-                        except Exception as e:
-                            logging.warning(f"Failed to cache results to disk: {e}")
+                    key = f"epsilon_{epsilon}_delta_{delta:.3f}%"
+                    results[key] = {
+                        "relations": [
+                            self._format_result(pair) for pair in valid_pairs
+                        ],
+                        "conditions": conditions,
+                    }
 
                 if self.progress_logger:
                     self.progress_logger.update_progress(f"rule_analysis_{id(rule)}", 1)
 
-        logging.info(f"Completed analysis for rule: {str(rule)[:50]}...")
         return results
 
     def analyse_ruleset(self, ruleset: List, output_dir: Optional[str] = None) -> Dict:

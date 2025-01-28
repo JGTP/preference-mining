@@ -8,7 +8,7 @@ from src.black_box import train_and_evaluate_model
 from src.feature_set_analysis import EnhancedFeatureAnalyser
 from src.ripper import cross_validate_RIPPER
 from src.utils import save_json_results
-from src.visualisation import create_plot, process_results
+from src.visualisation import create_plots, process_results
 
 
 def setup_logging():
@@ -116,14 +116,15 @@ def execute_pipeline(
             shap_values=analyser.shap_values,
             correlations=analyser.correlations,
         )
-        create_plot(
+        create_plots(
             df,
             output_dir,
+            n_rules=len(stable_rules),
             test_size=test_size,
             max_set_size=analysis_config.get("max_set_size", 10),
             top_features=analysis_config.get("top_features", 20),
             n_splits=n_splits,
-            total_features=len(X.columns),  # Pass total number of features
+            total_features=len(X.columns),
         )
 
         pipeline_results = {
