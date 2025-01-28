@@ -52,7 +52,18 @@ def test_create_plot_without_test_size(tmp_path, sample_results_df):
         "epsilon_plot_eps0.20_max10_top20_splits3.pdf",
     }
     actual_files = {f.name for f in output_dir.glob("*.pdf")}
-    assert actual_files == expected_files
+    print(f"Expected files: {expected_files}")
+    print(f"Actual files: {actual_files}")
+    assert all(
+        f.startswith("epsilon_plot_eps") for f in actual_files
+    ), "File names should start with 'epsilon_plot_eps'"
+    assert all(
+        "test" not in f for f in actual_files
+    ), "File names should not contain 'test' parameter"
+    assert (
+        len(actual_files) == 2
+    ), "Should create exactly 2 files (one for each epsilon value)"
+    assert actual_files == expected_files, "File names don't match expected pattern"
 
 
 def test_process_results():

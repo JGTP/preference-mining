@@ -123,6 +123,7 @@ def execute_pipeline(
             max_set_size=analysis_config.get("max_set_size", 10),
             top_features=analysis_config.get("top_features", 20),
             n_splits=n_splits,
+            total_features=len(X.columns),  # Pass total number of features
         )
 
         pipeline_results = {

@@ -6,6 +6,40 @@ from typing import Dict, Any, Optional, Union
 from collections import defaultdict
 
 
+def calculate_max_relations(N: int, max_set_size: int, top_features: int) -> int:
+    """
+    Calculate theoretical maximum number of preference relations.
+
+    Args:
+        N: Total number of features
+        max_set_size: Maximum size of feature sets
+        top_features: Number of top features to consider for set1
+
+    Returns:
+        int: Maximum possible number of preference relations
+    """
+    total = 0
+    for set1_size in range(1, min(max_set_size, top_features) + 1):
+        # Number of possible set1 combinations of this size
+        set1_count = sum(1 for _ in range(1, top_features + 1))
+        for i in range(set1_size):
+            set1_count = set1_count * (top_features - i) // (i + 1)
+
+        # For each set1 of this size, calculate possible set2 combinations
+        remaining_features = N - set1_size
+        set2_total = 0
+        for i in range(1, max_set_size + 1):
+            if i <= remaining_features:
+                set2_count = sum(1 for _ in range(1, remaining_features + 1))
+                for j in range(i):
+                    set2_count = set2_count * (remaining_features - j) // (j + 1)
+                set2_total += set2_count
+
+        total += set1_count * set2_total
+
+    return total
+
+
 def process_results(
     results: Dict[str, Any],
     shap_values: Optional[Dict[str, float]] = None,
@@ -14,6 +48,15 @@ def process_results(
 ) -> pd.DataFrame:
     """
     Process the analysis results into a DataFrame suitable for plotting.
+
+    Args:
+        results: Analysis results dictionary
+        shap_values: Dictionary of SHAP values
+        correlations: Dictionary of correlations
+        temp_dir: Directory containing cached values (if shap_values/correlations not provided)
+
+    Returns:
+        DataFrame with processed metrics
     """
     # Load cached values if not provided directly
     if shap_values is None or correlations is None:
@@ -77,6 +120,7 @@ def create_plot(
     max_set_size: int = 10,
     top_features: int = 20,
     n_splits: int = 3,
+    total_features: int = None,
 ) -> None:
     """
     Create separate plots for each epsilon value.
@@ -88,6 +132,7 @@ def create_plot(
         max_set_size: Maximum feature set size
         top_features: Number of top features considered
         n_splits: Number of CV splits
+        total_features: Total number of features in dataset
     """
     # Define metrics with their labels and styles
     metrics = {
@@ -96,50 +141,82 @@ def create_plot(
             "linestyle": "-",
             "marker": "o",
             "color": "#1f77b4",  # Blue
+            "axis": "primary",
         },
         "W": {
             "label": "Average Dimensions in $D_w$",
             "linestyle": "--",
             "marker": "s",
             "color": "#2ca02c",  # Green
+            "axis": "secondary",
         },
         "B": {
             "label": "Average Dimensions in $D_b$",
             "linestyle": ":",
             "marker": "^",
             "color": "#d62728",  # Red
+            "axis": "secondary",
         },
     }
 
+    # Calculate theoretical maximum if total_features is provided
+    max_relations = None
+    if total_features is not None:
+        max_relations = calculate_max_relations(
+            total_features, max_set_size, top_features
+        )
+
     # Create separate plot for each epsilon value
     for epsilon in sorted(df["epsilon"].unique()):
-        epsilon_data = df[df["epsilon"] == epsilon]
-
-        # Create figure with dual y-axes
-        fig, ax1 = plt.subplots(figsize=(12, 8))
+        # Create figure and axes with more compact size
+        fig, ax1 = plt.subplots(figsize=(8, 6))
         ax2 = ax1.twinx()
 
-        # Sort by delta to ensure lines are connected in order
-        epsilon_data = epsilon_data.sort_values("delta")
+        # Adjust margins to be tighter
+        plt.subplots_adjust(right=0.85)
 
-        # Plot each metric
+        # Get data for this epsilon
+        epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
+
+        # Plot lines and collect for legend
         lines = []
         labels = []
-        for metric, metric_style in metrics.items():
-            ax = ax1 if metric == "N" else ax2
+
+        # Plot each metric
+        for metric, style in metrics.items():
+            ax = ax1 if style["axis"] == "primary" else ax2
+
+            if metric == "N" and max_relations is not None:
+                percentage_data = (epsilon_data[metric] / max_relations) * 100
+
             line = ax.plot(
                 epsilon_data["delta"],
                 epsilon_data[metric],
-                label=metric_style["label"],
-                linestyle=metric_style["linestyle"],
-                marker=metric_style["marker"],
-                color=metric_style["color"],
+                label=style["label"],
+                linestyle=style["linestyle"],
+                marker=style["marker"],
+                color=style["color"],
                 markersize=8,
                 markerfacecolor="white",
                 markeredgewidth=1.5,
             )[0]
+
             lines.append(line)
-            labels.append(metric_style["label"])
+            labels.append(style["label"])
+
+            # Add percentage annotations for N
+            if metric == "N" and max_relations is not None:
+                for x, y, p in zip(
+                    epsilon_data["delta"], epsilon_data[metric], percentage_data
+                ):
+                    ax1.annotate(
+                        f"{p:.1f}%",
+                        (x, y),
+                        xytext=(0, 10),
+                        textcoords="offset points",
+                        ha="center",
+                        fontsize=8,
+                    )
 
         # Customize axes
         ax1.set_xlabel("δ")
@@ -149,19 +226,28 @@ def create_plot(
         # Add grid
         ax1.grid(True, alpha=0.3, zorder=0)
 
+        # Add title with theoretical maximum if available
+        if max_relations is not None:
+            plt.title(
+                f"ε = {epsilon:.2f} (max: {max_relations})",
+                pad=10,  # Reduce padding
+                fontsize=10,  # Slightly smaller font
+            )
+
         # Adjust layout
         fig.tight_layout()
 
-        # Create legend
+        # Add legend in a more compact position
         fig.legend(
             lines,
             labels,
-            bbox_to_anchor=(1.25, 1),
+            bbox_to_anchor=(1.0, 1.0),
             loc="upper left",
             borderaxespad=0,
             frameon=True,
             edgecolor="black",
             fancybox=False,
+            fontsize=8,  # Slightly smaller font for compactness
         )
 
         # Create filename with parameters
