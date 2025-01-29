@@ -6,8 +6,8 @@ from src.progress_logger import setup_progress_logging
 from src.preprocessing import DataPreprocessor
 from src.black_box import train_and_evaluate_model
 from src.feature_set_analysis import EnhancedFeatureAnalyser
-from src.ripper import cross_validate_RIPPER
-from src.utils import save_json_results
+from src.ripper import cross_validate_RIPPER, determine_operator
+from src.utils import convert_to_serialisable, save_json_results
 from src.visualisation import create_plots, process_results
 
 
@@ -85,6 +85,32 @@ def execute_pipeline(
         stable_rules = cross_validate_RIPPER(
             X, y, n_splits=n_splits, progress_logger=progress_logger
         )
+        ruleset_with_features = {
+            "rules": [],
+            "metadata": {
+                "total_rules": len(stable_rules),
+                "feature_names": X.columns.tolist(),
+            },
+        }
+
+        for i, rule in enumerate(stable_rules):
+            rule_info = {
+                "rule_id": f"rule_{i}",
+                "rule_string": str(rule),
+                "conditions": [],
+            }
+
+            for cond in rule.conds:
+                feature_name = X.columns[cond.feature]
+                operator = determine_operator(str(cond))
+                value = convert_to_serialisable(cond.val)
+                rule_info["conditions"].append(
+                    {"feature": feature_name, "operator": operator, "value": value}
+                )
+
+            ruleset_with_features["rules"].append(rule_info)
+
+        save_json_results(ruleset_with_features, output_dir, "ruleset_with_features")
         tqdm.write(f"\nNumber of stable rules found: {len(stable_rules)}")
         progress_logger.close_progress_bar(ripper_id)
 

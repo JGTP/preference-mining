@@ -1,7 +1,7 @@
 target:
   column: "suicide" 
 
-date_columns:
+date_columns: 
   - iyear
 
 numerical_columns:
@@ -13,21 +13,21 @@ numerical_columns:
   - nwound
   - nwoundus
   - woundte
-  - propvalue
   - nhostkid
   - nhostkidus
+
+numeric_categorical_columns: 
+  - attacktype1
+  
+columns_to_exclude: 
   - nhours
   - ransomamt 
   - ransomamtus
   - ransompaid
   - ransompaidus
   - nreleased
-
-numeric_categorical_columns:
+  - propvalue
   - extended
-  - attacktype1
-  
-columns_to_exclude: 
   - attacktype2
   - attacktype3
   - weaptype1

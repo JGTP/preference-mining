@@ -142,6 +142,196 @@ def process_results(
     return pd.DataFrame(rows)
 
 
+def create_plots(
+    df: pd.DataFrame,
+    output_dir: Path,
+    n_rules: int,
+    test_size: Optional[int] = None,
+    max_set_size: int = 10,
+    top_features: int = 20,
+    n_splits: int = 3,
+    total_features: int = None,
+) -> None:
+    """Create all visualization plots with improved font sizes for publication.
+
+    Args:
+        df: DataFrame containing processed results
+        output_dir: Directory to save plots
+        n_rules: Number of rules analyzed
+        test_size: Optional test set size
+        max_set_size: Maximum size of feature sets
+        top_features: Number of top features considered
+        n_splits: Number of cross-validation splits
+        total_features: Total number of features in dataset
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if total_features is not None:
+        max_relations = calculate_max_relations(
+            total_features, max_set_size, top_features
+        )
+    else:
+        max_relations = "Unknown"
+
+    # Set global font sizes
+    plt.rcParams.update(
+        {
+            "font.size": 12,
+            "axes.labelsize": 14,
+            "axes.titlesize": 16,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": 12,
+        }
+    )
+
+    epsilons = sorted(df["epsilon"].unique())
+    n_plots = len(epsilons)
+    n_cols = min(3, n_plots)
+    n_rows = (n_plots + n_cols - 1) // n_cols
+
+    # Create relations plot
+    fig_relations, axes_relations = plt.subplots(
+        n_rows + 1,
+        n_cols,
+        figsize=(6 * n_cols, 4.5 * (n_rows + 1)),
+        gridspec_kw={"height_ratios": [0.2] + [1] * n_rows},
+        squeeze=False,
+    )
+
+    summary_text = (
+        f"Total Rules: {n_rules}\nMaximum Possible Unique Relations: {max_relations}"
+    )
+    axes_relations[0, 0].text(
+        0.5,
+        0.5,
+        summary_text,
+        ha="center",
+        va="center",
+        transform=axes_relations[0, 0].transAxes,
+        fontsize=14,
+    )
+    axes_relations[0, 0].axis("off")
+
+    for j in range(1, n_cols):
+        axes_relations[0, j].axis("off")
+
+    # Create dimensions plot
+    fig_dimensions, axes_dimensions = plt.subplots(
+        n_rows, n_cols, figsize=(6 * n_cols, 4.5 * n_rows), squeeze=False
+    )
+
+    for idx, epsilon in enumerate(epsilons):
+        row = (idx // n_cols) + 1
+        col = idx % n_cols
+
+        epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
+
+        # Plot relations
+        ax1 = axes_relations[row, col]
+        ax2 = ax1.twinx()
+
+        l1 = ax1.plot(
+            epsilon_data["delta"],
+            epsilon_data["N_total"],
+            "-o",
+            color="#1f77b4",
+            label="Total Relations",
+            markersize=8,
+            markerfacecolor="white",
+            linewidth=2,
+        )
+
+        l2 = ax2.plot(
+            epsilon_data["delta"],
+            epsilon_data["N_unique"],
+            "--s",
+            color="#ff7f0e",
+            label="Unique Relations",
+            markersize=8,
+            markerfacecolor="white",
+            linewidth=2,
+        )
+
+        ax1.set_xlabel("δ", fontsize=14, labelpad=10)
+        ax1.set_ylabel("Total Relations", fontsize=14, labelpad=10)
+        ax2.set_ylabel("Unique Relations", fontsize=14, labelpad=10)
+        ax1.set_title(f"ε = {epsilon:.2f}", fontsize=16, pad=15)
+        ax1.grid(True, alpha=0.3)
+
+        # Increase tick label sizes
+        ax1.tick_params(axis="both", labelsize=12)
+        ax2.tick_params(axis="both", labelsize=12)
+
+        lines = l1 + l2
+        labels = [l.get_label() for l in lines]
+        ax1.legend(lines, labels, loc="upper right", fontsize=12)
+
+        # Plot dimensions
+        ax = axes_dimensions[idx // n_cols, col]
+
+        ax.plot(
+            epsilon_data["delta"],
+            epsilon_data["W"],
+            "-^",
+            color="#2ca02c",
+            label="$D_w$ size",
+            markersize=8,
+            markerfacecolor="white",
+            linewidth=2,
+        )
+        ax.plot(
+            epsilon_data["delta"],
+            epsilon_data["B"],
+            "--v",
+            color="#d62728",
+            label="$D_b$ size",
+            markersize=8,
+            markerfacecolor="white",
+            linewidth=2,
+        )
+
+        ax.set_xlabel("δ", fontsize=14, labelpad=10)
+        ax.set_ylabel("Average Dimensions", fontsize=14, labelpad=10)
+        ax.set_title(f"ε = {epsilon:.2f}", fontsize=16, pad=15)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=12)
+        ax.legend(loc="upper right", fontsize=12)
+
+    # Remove empty subplots
+    for idx in range(n_plots, n_rows * n_cols):
+        row = (idx // n_cols) + 1
+        col = idx % n_cols
+        axes_relations[row, col].remove()
+
+    for idx in range(n_plots, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        axes_dimensions[row, col].remove()
+
+    # Save plots with tight layout
+    for fig, name in [(fig_relations, "relations"), (fig_dimensions, "dimensions")]:
+        fig.tight_layout()
+
+        params = [
+            f"max{max_set_size}",
+            f"top{top_features}",
+            f"splits{n_splits}",
+        ]
+        if test_size is not None:
+            params.append(f"test{test_size}")
+
+        filename = f"{name}_plot_{'_'.join(params)}.pdf"
+        fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    # Create dimension distribution plot with improved font sizes
+    create_dimension_distribution(
+        df, output_dir, max_set_size, top_features, test_size, n_splits
+    )
+
+
 def create_dimension_distribution(
     df: pd.DataFrame,
     output_dir: Path,
@@ -150,7 +340,7 @@ def create_dimension_distribution(
     test_size: Optional[int] = None,
     n_splits: int = 3,
 ) -> None:
-    """Create dimension distribution heatmap plots.
+    """Create dimension distribution heatmap plots with improved font sizes.
 
     Args:
         df: DataFrame containing processed results
@@ -169,7 +359,7 @@ def create_dimension_distribution(
     n_rows = (n_plots + n_cols - 1) // n_cols
 
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), squeeze=False
+        n_rows, n_cols, figsize=(7 * n_cols, 6 * n_rows), squeeze=False
     )
 
     size_combinations = [
@@ -202,11 +392,16 @@ def create_dimension_distribution(
         ax.set_yticks(range(len(size_combinations)))
         ax.set_yticklabels(size_combinations)
 
-        ax.set_xlabel("δ")
-        ax.set_ylabel("Set Sizes (|Dw|, |Db|)")
-        ax.set_title(f"ε = {epsilon:.2f}")
+        ax.set_xlabel("δ", fontsize=14, labelpad=10)
+        ax.set_ylabel("Set Sizes (|Dw|, |Db|)", fontsize=14, labelpad=10)
+        ax.set_title(f"ε = {epsilon:.2f}", fontsize=16, pad=15)
 
-        plt.colorbar(im, ax=ax, label="Percentage of Relations")
+        # Increase tick label sizes
+        ax.tick_params(axis="both", labelsize=12)
+
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.ax.set_ylabel("Percentage of Relations", fontsize=14, labelpad=15)
+        cbar.ax.tick_params(labelsize=12)
 
     for idx in range(n_plots, n_rows * n_cols):
         row = idx // n_cols
@@ -226,171 +421,3 @@ def create_dimension_distribution(
     filename = f"dimension_distribution_{'_'.join(params)}.pdf"
     fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
     plt.close(fig)
-
-
-def create_plots(
-    df: pd.DataFrame,
-    output_dir: Path,
-    n_rules: int,
-    test_size: Optional[int] = None,
-    max_set_size: int = 10,
-    top_features: int = 20,
-    n_splits: int = 3,
-    total_features: int = None,
-) -> None:
-    """Create all visualization plots.
-
-    Args:
-        df: DataFrame containing processed results
-        output_dir: Directory to save plots
-        n_rules: Number of rules analyzed
-        test_size: Optional test set size
-        max_set_size: Maximum size of feature sets
-        top_features: Number of top features considered
-        n_splits: Number of cross-validation splits
-        total_features: Total number of features in dataset
-    """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if total_features is not None:
-        max_relations = calculate_max_relations(
-            total_features, max_set_size, top_features
-        )
-    else:
-        max_relations = "Unknown"
-
-    epsilons = sorted(df["epsilon"].unique())
-    n_plots = len(epsilons)
-    n_cols = min(3, n_plots)
-    n_rows = (n_plots + n_cols - 1) // n_cols
-
-    # Create relations plot
-    fig_relations, axes_relations = plt.subplots(
-        n_rows + 1,
-        n_cols,
-        figsize=(5 * n_cols, 4 * (n_rows + 1)),
-        gridspec_kw={"height_ratios": [0.2] + [1] * n_rows},
-        squeeze=False,
-    )
-
-    summary_text = (
-        f"Total Rules: {n_rules}\nMaximum Possible Unique Relations: {max_relations}"
-    )
-    axes_relations[0, 0].text(
-        0.5,
-        0.5,
-        summary_text,
-        ha="center",
-        va="center",
-        transform=axes_relations[0, 0].transAxes,
-    )
-    axes_relations[0, 0].axis("off")
-
-    for j in range(1, n_cols):
-        axes_relations[0, j].axis("off")
-
-    # Create dimensions plot
-    fig_dimensions, axes_dimensions = plt.subplots(
-        n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False
-    )
-
-    for idx, epsilon in enumerate(epsilons):
-        row = (idx // n_cols) + 1
-        col = idx % n_cols
-
-        epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
-
-        # Plot relations
-        ax1 = axes_relations[row, col]
-        ax2 = ax1.twinx()
-
-        l1 = ax1.plot(
-            epsilon_data["delta"],
-            epsilon_data["N_total"],
-            "-o",
-            color="#1f77b4",
-            label="Total Relations",
-            markersize=6,
-            markerfacecolor="white",
-        )
-
-        l2 = ax2.plot(
-            epsilon_data["delta"],
-            epsilon_data["N_unique"],
-            "--s",
-            color="#ff7f0e",
-            label="Unique Relations",
-            markersize=6,
-            markerfacecolor="white",
-        )
-
-        ax1.set_xlabel("δ")
-        ax1.set_ylabel("Total Relations")
-        ax2.set_ylabel("Unique Relations")
-        ax1.set_title(f"ε = {epsilon:.2f}")
-        ax1.grid(True, alpha=0.3)
-
-        lines = l1 + l2
-        labels = [l.get_label() for l in lines]
-        ax1.legend(lines, labels, loc="upper right")
-
-        # Plot dimensions
-        ax = axes_dimensions[idx // n_cols, col]
-
-        ax.plot(
-            epsilon_data["delta"],
-            epsilon_data["W"],
-            "-^",
-            color="#2ca02c",
-            label="$D_w$ size",
-            markersize=6,
-            markerfacecolor="white",
-        )
-        ax.plot(
-            epsilon_data["delta"],
-            epsilon_data["B"],
-            "--v",
-            color="#d62728",
-            label="$D_b$ size",
-            markersize=6,
-            markerfacecolor="white",
-        )
-
-        ax.set_xlabel("δ")
-        ax.set_ylabel("Average Dimensions")
-        ax.set_title(f"ε = {epsilon:.2f}")
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="upper right")
-
-    # Remove empty subplots
-    for idx in range(n_plots, n_rows * n_cols):
-        row = (idx // n_cols) + 1
-        col = idx % n_cols
-        axes_relations[row, col].remove()
-
-    for idx in range(n_plots, n_rows * n_cols):
-        row = idx // n_cols
-        col = idx % n_cols
-        axes_dimensions[row, col].remove()
-
-    # Save plots
-    for fig, name in [(fig_relations, "relations"), (fig_dimensions, "dimensions")]:
-        fig.tight_layout()
-
-        params = [
-            f"max{max_set_size}",
-            f"top{top_features}",
-            f"splits{n_splits}",
-        ]
-        if test_size is not None:
-            params.append(f"test{test_size}")
-
-        filename = f"{name}_plot_{'_'.join(params)}.pdf"
-        fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-
-    # Create dimension distribution plot
-    create_dimension_distribution(
-        df, output_dir, max_set_size, top_features, test_size, n_splits
-    )
