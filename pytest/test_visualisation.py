@@ -144,25 +144,53 @@ def test_process_results_missing_values():
 def test_create_dimension_distribution(
     tmp_path, sample_results, mock_shap_values, mock_correlations
 ):
-    """Test creation of dimension distribution plot"""
+    """Test creation of dimension distribution plot with all parameters."""
     output_dir = tmp_path / "plots"
     output_dir.mkdir()
 
     df = process_results(sample_results, mock_shap_values, mock_correlations)
-    create_dimension_distribution(df, output_dir, max_set_size=3)
 
-    distribution_plots = list(output_dir.glob("dimension_distribution*.pdf"))
-    assert len(distribution_plots) == 1
+    # Test with minimum parameters
+    create_dimension_distribution(df, output_dir, max_set_size=3, top_features=5)
+    dist_plots = list(output_dir.glob("dimension_distribution*.pdf"))
+    assert len(dist_plots) == 1
+    assert dist_plots[0].name == "dimension_distribution_max3_top5_splits3.pdf"
+
+    # Test with test_size
+    create_dimension_distribution(
+        df, output_dir, max_set_size=3, top_features=5, test_size=1000
+    )
+    dist_plots = list(output_dir.glob("*test1000.pdf"))
+    assert len(dist_plots) == 1
+    assert dist_plots[0].name == "dimension_distribution_max3_top5_splits3_test1000.pdf"
+
+    # Test with different splits
+    create_dimension_distribution(
+        df, output_dir, max_set_size=3, top_features=5, n_splits=5
+    )
+    dist_plots = list(output_dir.glob("*splits5.pdf"))
+    assert len(dist_plots) == 1
+    assert dist_plots[0].name == "dimension_distribution_max3_top5_splits5.pdf"
+
+    # Test with all parameters
+    create_dimension_distribution(
+        df, output_dir, max_set_size=4, top_features=10, test_size=500, n_splits=4
+    )
+    dist_plots = list(output_dir.glob("*max4_top10*.pdf"))
+    assert len(dist_plots) == 1
+    assert dist_plots[0].name == "dimension_distribution_max4_top10_splits4_test500.pdf"
 
 
 def test_create_plots_basic(
     tmp_path, sample_results, mock_shap_values, mock_correlations
 ):
-    """Test basic plot creation functionality"""
+    """Test basic plot creation functionality with different parameter combinations."""
     output_dir = tmp_path / "plots"
     output_dir.mkdir()
 
     df = process_results(sample_results, mock_shap_values, mock_correlations)
+
+    # Test with minimum required parameters
     create_plots(
         df,
         output_dir,
@@ -174,13 +202,35 @@ def test_create_plots_basic(
     )
 
     plot_files = list(output_dir.glob("*.pdf"))
-    assert len(plot_files) == 3
+    assert len(plot_files) == 3  # Should create all three plot types
 
     file_names = {f.name for f in plot_files}
     expected_names = {
         "relations_plot_max3_top5_splits3.pdf",
         "dimensions_plot_max3_top5_splits3.pdf",
-        "dimension_distribution_max3_splits3.pdf",
+        "dimension_distribution_max3_top5_splits3.pdf",
+    }
+    assert file_names == expected_names
+
+    # Test with different max_set_size and top_features
+    create_plots(
+        df,
+        output_dir,
+        n_rules=2,
+        max_set_size=4,
+        top_features=10,
+        n_splits=3,
+        total_features=15,
+    )
+
+    plot_files = list(output_dir.glob("*max4_top10*.pdf"))
+    assert len(plot_files) == 3
+
+    file_names = {f.name for f in plot_files}
+    expected_names = {
+        "relations_plot_max4_top10_splits3.pdf",
+        "dimensions_plot_max4_top10_splits3.pdf",
+        "dimension_distribution_max4_top10_splits3.pdf",
     }
     assert file_names == expected_names
 
@@ -188,11 +238,13 @@ def test_create_plots_basic(
 def test_create_plots_with_test_size(
     tmp_path, sample_results, mock_shap_values, mock_correlations
 ):
-    """Test plot creation with test_size parameter"""
+    """Test plot creation with test_size parameter and various combinations."""
     output_dir = tmp_path / "plots"
     output_dir.mkdir()
 
     df = process_results(sample_results, mock_shap_values, mock_correlations)
+
+    # Test with basic test_size
     create_plots(
         df,
         output_dir,
@@ -208,9 +260,36 @@ def test_create_plots_with_test_size(
     expected_names = {
         "relations_plot_max3_top5_splits3_test1000.pdf",
         "dimensions_plot_max3_top5_splits3_test1000.pdf",
-        "dimension_distribution_max3_splits3_test1000.pdf",
+        "dimension_distribution_max3_top5_splits3_test1000.pdf",
     }
     assert file_names == expected_names
+
+    # Test with different parameters and test_size
+    create_plots(
+        df,
+        output_dir,
+        n_rules=3,
+        test_size=500,
+        max_set_size=4,
+        top_features=10,
+        n_splits=5,
+        total_features=15,
+    )
+
+    plot_files = list(output_dir.glob("*test500.pdf"))
+    assert len(plot_files) == 3
+
+    file_names = {f.name for f in plot_files}
+    expected_names = {
+        "relations_plot_max4_top10_splits5_test500.pdf",
+        "dimensions_plot_max4_top10_splits5_test500.pdf",
+        "dimension_distribution_max4_top10_splits5_test500.pdf",
+    }
+    assert file_names == expected_names
+
+    # Verify file contents exist
+    for plot_file in plot_files:
+        assert plot_file.stat().st_size > 0  # Check files are not empty
 
 
 def test_calculate_max_relations_basic():

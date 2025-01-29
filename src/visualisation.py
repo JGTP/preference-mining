@@ -8,19 +8,34 @@ from collections import defaultdict
 
 
 def calculate_max_relations(N: int, max_set_size: int, top_features: int) -> int:
+    """Calculate maximum possible number of feature set relations.
+
+    Args:
+        N: Total number of features
+        max_set_size: Maximum size of feature sets
+        top_features: Number of top features to consider (will be capped at N)
+
+    Returns:
+        int: Maximum possible number of relations
+    """
+    # Validate and cap parameters
+    top_features = min(top_features, N)
+    max_set_size = min(max_set_size, N)
+
     total = 0
     for set1_size in range(1, min(max_set_size, top_features) + 1):
-
+        # Calculate number of possible set1 combinations from top features
         set1_count = 1
         for i in range(set1_size):
             set1_count = set1_count * (top_features - i) // (i + 1)
 
+        # Calculate remaining features after selecting set1
         remaining_features = (N - top_features) + (top_features - set1_size)
         set2_total = 0
 
+        # Calculate possible set2 combinations from remaining features
         for i in range(1, max_set_size + 1):
             if i <= remaining_features:
-
                 set2_count = 1
                 for j in range(i):
                     set2_count = set2_count * (remaining_features - j) // (j + 1)
@@ -37,6 +52,17 @@ def process_results(
     correlations: Optional[Dict[str, float]] = None,
     temp_dir: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
+    """Process feature analysis results into a DataFrame for visualization.
+
+    Args:
+        results: Dictionary containing feature analysis results
+        shap_values: Dictionary of SHAP values for each feature
+        correlations: Dictionary of feature correlations
+        temp_dir: Optional directory containing cached values
+
+    Returns:
+        DataFrame containing processed results
+    """
     if shap_values is None or correlations is None:
         if temp_dir is None:
             raise ValueError(
@@ -69,7 +95,6 @@ def process_results(
 
             if analyses:
                 for analysis in analyses["relations"]:
-
                     set1_frozen = frozenset(analysis["set1"])
                     set2_frozen = frozenset(analysis["set2"])
                     feature_pair = (set1_frozen, set2_frozen)
@@ -77,7 +102,6 @@ def process_results(
                     metrics_by_params[(epsilon, delta)]["all_relations"].append(
                         feature_pair
                     )
-
                     metrics_by_params[(epsilon, delta)]["unique_pairs"].add(
                         feature_pair
                     )
@@ -92,9 +116,7 @@ def process_results(
 
     rows = []
     for (epsilon, delta), metrics in metrics_by_params.items():
-
         total_relations = len(metrics["all_relations"])
-
         unique_relations = len(metrics["unique_pairs"])
 
         size_dist = metrics["size_dist"]
@@ -124,9 +146,20 @@ def create_dimension_distribution(
     df: pd.DataFrame,
     output_dir: Path,
     max_set_size: int,
+    top_features: int,
     test_size: Optional[int] = None,
     n_splits: int = 3,
 ) -> None:
+    """Create dimension distribution heatmap plots.
+
+    Args:
+        df: DataFrame containing processed results
+        output_dir: Directory to save plots
+        max_set_size: Maximum size of feature sets
+        top_features: Number of top features considered
+        test_size: Optional test set size
+        n_splits: Number of cross-validation splits
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -184,6 +217,7 @@ def create_dimension_distribution(
 
     params = [
         f"max{max_set_size}",
+        f"top{top_features}",
         f"splits{n_splits}",
     ]
     if test_size is not None:
@@ -204,16 +238,34 @@ def create_plots(
     n_splits: int = 3,
     total_features: int = None,
 ) -> None:
+    """Create all visualization plots.
+
+    Args:
+        df: DataFrame containing processed results
+        output_dir: Directory to save plots
+        n_rules: Number of rules analyzed
+        test_size: Optional test set size
+        max_set_size: Maximum size of feature sets
+        top_features: Number of top features considered
+        n_splits: Number of cross-validation splits
+        total_features: Total number of features in dataset
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    max_relations = calculate_max_relations(total_features, max_set_size, top_features)
+    if total_features is not None:
+        max_relations = calculate_max_relations(
+            total_features, max_set_size, top_features
+        )
+    else:
+        max_relations = "Unknown"
 
     epsilons = sorted(df["epsilon"].unique())
     n_plots = len(epsilons)
     n_cols = min(3, n_plots)
     n_rows = (n_plots + n_cols - 1) // n_cols
 
+    # Create relations plot
     fig_relations, axes_relations = plt.subplots(
         n_rows + 1,
         n_cols,
@@ -238,6 +290,7 @@ def create_plots(
     for j in range(1, n_cols):
         axes_relations[0, j].axis("off")
 
+    # Create dimensions plot
     fig_dimensions, axes_dimensions = plt.subplots(
         n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False
     )
@@ -248,6 +301,7 @@ def create_plots(
 
         epsilon_data = df[df["epsilon"] == epsilon].sort_values("delta")
 
+        # Plot relations
         ax1 = axes_relations[row, col]
         ax2 = ax1.twinx()
 
@@ -281,6 +335,7 @@ def create_plots(
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc="upper right")
 
+        # Plot dimensions
         ax = axes_dimensions[idx // n_cols, col]
 
         ax.plot(
@@ -308,6 +363,7 @@ def create_plots(
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper right")
 
+    # Remove empty subplots
     for idx in range(n_plots, n_rows * n_cols):
         row = (idx // n_cols) + 1
         col = idx % n_cols
@@ -318,6 +374,7 @@ def create_plots(
         col = idx % n_cols
         axes_dimensions[row, col].remove()
 
+    # Save plots
     for fig, name in [(fig_relations, "relations"), (fig_dimensions, "dimensions")]:
         fig.tight_layout()
 
@@ -333,4 +390,7 @@ def create_plots(
         fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
-    create_dimension_distribution(df, output_dir, max_set_size, test_size, n_splits)
+    # Create dimension distribution plot
+    create_dimension_distribution(
+        df, output_dir, max_set_size, top_features, test_size, n_splits
+    )
